@@ -1,137 +1,158 @@
 # MikroTik Quota Threshold Monitor & Policy Control Plane
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![RouterOS](https://img.shields.io/badge/RouterOS-v7.x-blue.svg)](https://mikrotik.com)
-[![Python](https://img.shields.io/badge/Python-3.10%2B-blue.svg)](https://www.python.org/)
-[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-15%2B-blue.svg)](https://www.postgresql.org/)
-[![Grafana](https://img.shields.io/badge/Grafana-v11%2B-orange.svg)](https://grafana.com/)
-[![n8n](https://img.shields.io/badge/Orchestration-n8n-red.svg)](https://n8n.io/)
+[![RouterOS](https://img.shields.io/badge/RouterOS-v7.x-006699.svg)](https://mikrotik.com)
+[![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB.svg?logo=python&logoColor=white)](https://www.python.org/)
+[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-15%2B-336791.svg?logo=postgresql&logoColor=white)](https://www.postgresql.org/)
+[![Grafana](https://img.shields.io/badge/Grafana-v11%2B-F46800.svg?logo=grafana&logoColor=white)](https://grafana.com/)
+[![n8n](https://img.shields.io/badge/Orchestration-n8n-EA4B71.svg?logo=n8n&logoColor=white)](https://n8n.io/)
+[![Telegram](https://img.shields.io/badge/Bot-Telegram-26A5E4.svg?logo=telegram&logoColor=white)](https://telegram.org/)
 
-A distributed, enterprise-grade network automation, quota burn-rate monitoring, and policy-based routing (PBR) control plane designed for **MikroTik RouterOS v7** multi-WAN deployments.
-
----
-
-## 📌 Problem & Overview
-
-Managing multi-WAN connections with metered monthly quotas (e.g., DSL/Fiber packages with FUP caps) presents recurring challenges:
-- **Overage charges & throttling**: When a metered WAN exhausts its allowance, traffic silently degrades or incurs high cost.
-- **Lack of ISP SLA dispute records**: When an ISP suffers recurring micro-outages or high latency, subscribers lack verifiable timestamped logs to claim compensation.
-- **Hotspot abuse & visibility gaps**: Unmonitored bandwidth consumption by individual hotspot clients drains package quotas prematurely.
-
-This repository provides an automated, zero-touch operational ecosystem:
-1. **Periodic Telemetry Collection**: RouterOS scripts collect interface byte counters, ICMP latency/loss probes, and active hotspot client data.
-2. **Orchestrated Ingestion & Evaluation**: **n8n** webhook workflows ingest telemetry, compute delta consumption, and trigger policy thresholds.
-3. **Relational Quota Ledger**: **PostgreSQL** stores time-series readings, monthly billing cycle quotas, ISP outage events, and hotspot usage.
-4. **Interactive Operations Bot**: A multi-threaded **Telegram Ops Bot** delivers proactive quota threshold alerts (80%, 95%, 100%), smart failover diagnostics, and interactive control buttons.
-5. **Automated Policy Routing (PBR)**: Dynamically isolates exhausted WANs into fallback blackhole/bypass tables and automatically restores them upon quota renewal.
-6. **Zero-Touch Observability**: Pre-provisioned **Grafana** dashboards providing real-time WAN burn rate, hotspot client consumption, and SLA health.
+An enterprise-grade, distributed network automation, quota burn-rate tracking, and policy-based routing (PBR) control plane designed for **MikroTik RouterOS v7** multi-WAN environments.
 
 ---
 
-## 🏗️ Architecture
+## 📑 Table of Contents
 
+- [Overview & Problem Statement](#-overview--problem-statement)
+- [System Architecture](#-system-architecture)
+- [Repository Structure](#-repository-structure)
+- [Core Subsystems](#-core-subsystems)
+  - [1. Dual-WAN Quota Engine](#1-dual-wan-quota-engine)
+  - [2. Policy-Based Routing (PBR) Isolation](#2-policy-based-routing-pbr-isolation)
+  - [3. ISP SLA Outage & Dispute Ledger](#3-isp-sla-outage--dispute-ledger)
+  - [4. Hotspot Session Analytics](#4-hotspot-session-analytics)
+  - [5. Interactive Telegram Operations Bot](#5-interactive-telegram-operations-bot)
+  - [6. Automated Telemetry Retention Engine](#6-automated-telemetry-retention-engine)
+  - [7. Zero-Touch Grafana Dashboards](#7-zero-touch-grafana-dashboards)
+- [Telegram Bot Command Reference](#-telegram-bot-command-reference)
+- [Step-by-Step Quickstart](#-step-by-step-quickstart)
+  - [Step 1: Clone & Configure Environment](#step-1-clone--configure-environment)
+  - [Step 2: Database Initialization](#step-2-database-initialization)
+  - [Step 3: Deploy RouterOS Scripts](#step-3-deploy-routeros-scripts)
+  - [Step 4: Import n8n Orchestration Workflows](#step-4-import-n8n-orchestration-workflows)
+  - [Step 5: Launch Grafana Observability](#step-5-launch-grafana-observability)
+  - [Step 6: Start the Telegram Bot Daemon](#step-6-start-the-telegram-bot-daemon)
+  - [Step 7: Schedule Automated Maintenance](#step-7-schedule-automated-maintenance)
+- [Verification & Testing](#-verification--testing)
+- [Security & Privacy](#-security--privacy)
+- [Contributing](#-contributing)
+- [License](#-license)
+
+---
+
+## 🎯 Overview & Problem Statement
+
+Multi-WAN deployments with metered monthly allowances (e.g. DSL, Fiber, or 4G/5G backup links with Fair Usage Policies) frequently suffer from three critical challenges:
+
+1. **Uncontrolled Overage & Degradation**: When a metered interface reaches 100% capacity, ISPs either drop speeds down to an unusable 256 kbps or apply punitive per-gigabyte overage charges.
+2. **Asymmetric Billing Cycles & Invisible Burn Rates**: Multiple uplinks from different providers (e.g., Vodafone DSL and Telecom Egypt / WE VDSL) operate on differing renewal dates, making unified tracking difficult.
+3. **Lack of Verifiable ISP Outage Records**: Intermittent micro-outages or excessive latency degrade user experience, but subscribers lack immutable, timestamped ICMP logs to substantiate SLA compensation claims.
+4. **Hotspot Client Abuse**: Individual rogue clients or bandwidth hogs on internal Hotspot networks can consume gigabytes in hours without immediate administrator visibility.
+
+### The Solution
+
+This project implements an end-to-end, automated loop:
+- **RouterOS v7 Telemetry**: Scheduled scripts stream interface byte counters, ICMP latency/loss probes, and active Hotspot sessions via HTTP webhooks.
+- **n8n Orchestration**: Ingests payloads, calculates exact byte delta increments, and evaluates quota threshold events.
+- **PostgreSQL Relational Ledger**: Stores time-series telemetry, billing cycle definitions, and ISP outage incidents.
+- **Automated PBR Isolation**: Automatically marks connections and routes traffic away from exhausted links to protect the network from penalties.
+- **Telegram Operations Bot**: Delivers real-time Arabic & English threshold alerts (80%, 95%, 100%) and provides dual-row interactive control buttons.
+- **Zero-Touch Grafana Stack**: Visualizes burn rates, SLA health, and per-user Hotspot metrics out-of-the-box.
+
+---
+
+## 🏗️ System Architecture
+
+```mermaid
+flowchart TD
+    subgraph MikroTik ["MikroTik RouterOS v7"]
+        R1["wan_control_pbr.rsc<br/>(PBR & Quota Isolation)"]
+        R2["wan_quality.rsc<br/>(ICMP Latency & Loss Probes)"]
+        R3["hotspot_telemetry.rsc<br/>(Client Session Accounting)"]
+    end
+
+    subgraph Orchestration ["n8n Ingestion Workflows"]
+        W1["Quota Threshold Monitor.json<br/>(Usage Calculation & Delta Engine)"]
+        W2["WAN Quality Ingestion.json<br/>(ICMP Probe Processor)"]
+        W3["Hotspot Ingestion.json<br/>(User Session Ingest)"]
+        W4["Router Offline Monitor.json<br/>(Heartbeat Dead Man's Switch)"]
+    end
+
+    subgraph Database ["PostgreSQL Relational Store"]
+        DB1[("mikrotik_wan_readings<br/>(Time-series Counters)")]
+        DB2[("mikrotik_wan_quality<br/>(Ping & Loss History)")]
+        DB3[("hotspot_user_telemetry<br/>(Session Accounting)")]
+        DB4[("wan_outage_events<br/>(ISP Dispute Ledger)")]
+        DB5[("view_mikrotik_wan_quota_status<br/>(Burn-rate Calculation View)")]
+    end
+
+    subgraph Observability ["Observability & Control"]
+        G["Grafana Dashboards<br/>(WAN Overview & Hotspot Analytics)"]
+        T["Telegram Operations Bot<br/>(Interactive Buttons & Incident Alerts)"]
+        M["Retention Engine<br/>(prune_telemetry.py)"]
+    end
+
+    MikroTik -- "HTTP Webhooks" --> Orchestration
+    Orchestration -- "SQL Insert / Update" --> Database
+    Database -- "Real-time Queries" --> Observability
+    T -. "Manual / Automated Override" .-> MikroTik
 ```
-                                  +----------------------------+
-                                  |    MikroTik RouterOS v7    |
-                                  |  - routeros/wan_control... |
-                                  |  - routeros/wan_quality... |
-                                  |  - routeros/hotspot_tel... |
-                                  +--------------+-------------+
-                                                 |
-                               HTTP Webhooks     |   Scheduled Fetch
-                                                 v
-                                  +----------------------------+
-                                  |       n8n Workflows        |
-                                  |  - Quota Ingestion & Calc  |
-                                  |  - Latency & Loss Monitor  |
-                                  |  - Hotspot Session Track   |
-                                  +--------------+-------------+
-                                                 |
-                                      SQL INSERT / EVALUATE
-                                                 v
-                                  +----------------------------+
-                                  |    PostgreSQL Database     |
-                                  |  - database/schema.sql     |
-                                  |  - Quota Status Views      |
-                                  |  - ISP Outage Event Log    |
-                                  +-------+--------------+-----+
-                                          |              |
-                    Real-time Queries     |              | Telemetry & Polling
-                                          v              v
-               +----------------------------+   +----------------------------+
-               |     Grafana Dashboards     |   |    Telegram Ops Bot        |
-               |  - provisioning/dashboards |   |  - bot/telegram_bot_daemon |
-               |  - mikrotik-overview.json  |   |  - Live Alerts & Overrides |
-               +----------------------------+   +----------------------------+
-```
-
----
-
-## ✨ Key Features
-
-- **Dual-WAN Multi-Homing Quota Engine**:
-  - Independent monthly billing cycle tracking for multiple ISPs (e.g., Vodafone DSL + WE Egypt VDSL).
-  - Configurable quota allowances, daily burn-rate projection, and threshold notifications at 80%, 95%, and 100%.
-- **Policy-Based Routing (PBR) Isolation**:
-  - RouterOS routing table separation (`to_WAN1`, `to_WAN2`).
-  - Automatic isolation of exhausted links to prevent overage costs, with seamless failover to healthy links.
-- **ISP Outage & SLA Dispute Logging**:
-  - Continuous ICMP quality probes measuring latency and packet loss.
-  - Automatic logging of ISP downtime events in `wan_outage_events` to back billing dispute claims with precise duration evidence.
-- **Hotspot Telemetry & Voucher Analytics**:
-  - Real-time client session tracking: active MAC addresses, assigned IP, session uptime, bytes in/out.
-  - Identification of bandwidth hogs and voucher expiration states.
-- **Interactive Telegram Operations Bot**:
-  - Interactive on-screen keyboard: `/status`, `/failover`, `/hotspot`, `/claim`.
-  - Instant SLA claim summary generation formatted for ISP customer support escalation.
-- **Chunked Data Retention Engine (`maintenance/prune_telemetry.py`)**:
-  - Automated non-locking deletion of high-frequency telemetry (ICMP ping records >14 days, hotspot records >30 days) to prevent disk bloat.
-- **Zero-Touch Provisioning**:
-  - Standalone Docker Compose configuration (`docker-compose.monitoring.yml`) mounting provisioned PostgreSQL data sources and Grafana dashboards.
 
 ---
 
 ## 📂 Repository Structure
 
-The project is cleanly structured into domain-specific modules:
+The codebase is organized into modular, domain-specific directories:
 
 ```
 .
-├── bot/                                   # Telegram Operations Bot & management
-│   ├── telegram_bot_daemon.py             # Local bot daemon with interactive keyboard
-│   ├── telegram_bot_daemon_oci.py         # Production OCI bot daemon with auto-reconnect
-│   └── install_bot_service.py             # Systemd service installer
-├── dashboards/                            # Grafana dashboard models & verification tools
-│   ├── mikrotik-overview-upgraded.json    # Upgraded Grafana overview panel model
-│   └── run_all_dashboards.py              # Dashboard validation and export utilities
-├── database/                              # PostgreSQL DDL, schema migrations, and queries
+├── bot/                                   # Telegram Operations Bot & daemons
+│   ├── telegram_bot_daemon.py             # Multi-threaded bot daemon (Local environment)
+│   ├── telegram_bot_daemon_oci.py         # Production OCI daemon (Zero-dependency .env loader)
+│   ├── install_bot_service.py             # Systemd service installer for Linux hosts
+│   └── deploy_bot_dual_keyboard.py        # Interactive dual-row keyboard configurator
+├── dashboards/                            # Grafana dashboard definitions & panel tools
+│   ├── mikrotik-overview-upgraded.json    # Upgraded Grafana overview dashboard model
+│   ├── updated_wan_dashboard.json         # WAN traffic & quota dashboard
+│   ├── hotspot_dashboard_backup.json      # Hotspot user dashboard model
+│   └── run_all_dashboards.py              # Automated dashboard validator & exporter
+├── database/                              # PostgreSQL DDL, views, and migration scripts
 │   ├── schema.sql                         # Complete database schema, views, and seed data
-│   ├── schema_production_actual.sql       # Reference production DDL snapshot
-│   └── insert_quality_wf.sql              # Quality metrics SQL schema definitions
+│   ├── schema_production_actual.sql       # Reference production DDL snapshot (72 tables)
+│   ├── insert_quality_wf.sql              # Quality metrics SQL schema definition
+│   └── check_billing_tables.py            # Billing cycle and view inspection tool
 ├── deploy/                                # Server deployments & reverse proxy configs
-│   ├── docker-compose.server.yml          # Production server compose stack
-│   └── mikrotik.example.com.conf          # Nginx reverse proxy configuration
-├── docs/                                  # Engineering documentation & test reports
-│   ├── PRODUCTION_ROLLOUT.md              # Production rollout verification checklist
+│   ├── docker-compose.server.yml          # Dual-network production server compose stack
+│   ├── n8n_compose_patched.yml            # Patched n8n compose with database bridge
+│   └── mikrotik.example.com.conf          # Nginx reverse proxy SSL configuration
+├── docs/                                  # Engineering documentation & operational runbooks
+│   ├── PRODUCTION_ROLLOUT.md              # 5-phase production deployment verification guide
 │   ├── QUOTA_ALERT_BEHAVIOR.md            # Quota threshold state machine specifications
-│   └── ROLLBACK_PROCEDURE.md              # Emergency rollback and failover runbooks
-├── maintenance/                           # Telemetry pruning and background data retention
+│   ├── ROLLBACK_PROCEDURE.md              # Emergency rollback and failover runbooks
+│   ├── INGESTION_REPAIR.md                # Docker network root-cause analysis runbook
+│   └── DRY_RUN.md                         # Offline quota simulation documentation
+├── maintenance/                           # Data retention engine & background pruning
 │   ├── prune_telemetry.py                 # Chunked, non-locking historical log cleaner
-│   └── test_prune_telemetry.py            # Unit tests for data retention engine
-├── provisioning/                          # Grafana zero-touch provisioning
-│   ├── dashboards/                        # Automated dashboard loader & JSON definitions
-│   └── datasources/                       # PostgreSQL datasource definition
-├── routeros/                              # MikroTik RouterOS v7 automation scripts (.rsc)
+│   └── test_prune_telemetry.py            # Unit tests for telemetry retention engine
+├── provisioning/                          # Grafana zero-touch provisioning stack
+│   ├── dashboards/                        # Provisioned dashboard models & provider YAML
+│   └── datasources/                       # Pre-configured PostgreSQL datasource YAML
+├── routeros/                              # MikroTik RouterOS v7 scripts (.rsc)
 │   ├── wan_control_pbr.rsc                # Policy-based routing and isolation logic
 │   ├── wan_quality.rsc                    # ICMP probe for latency & packet loss
 │   ├── hotspot_telemetry.rsc              # Active hotspot client telemetry collector
-│   └── wccp_control.rsc                   # WCCP cache redirection helper
+│   ├── wccp_control.rsc                   # WCCP cache redirection and override helper
+│   └── router_config_clean.rsc            # Sanitized reference router configuration export
 ├── tests/                                 # Unit, integration, and security test suites
-│   ├── test_prune_telemetry.py            # Retention unit tests
-│   └── test_quota_alert_dry_run.py        # Dry-run threshold state machine tests
+│   ├── test_quota_alert_dry_run.py        # Offline quota state machine unit tests
+│   ├── test_quality_webhook.py            # Webhook latency test runner
+│   └── test_network_isolation.sh          # Network container isolation test suite
 ├── tools/                                 # Operational utilities, diagnostics, dispatchers
-│   ├── quota_alert_dry_run.py             # Offline simulation of quota threshold triggers
-│   └── query_telemetry.py                 # Ad-hoc telemetry inspection utility
+│   ├── quota_alert_dry_run.py             # Offline CLI quota simulator
+│   ├── query_telemetry.py                 # Ad-hoc telemetry inspection utility
+│   ├── dispatch_correct_vf.py             # Vodafone notification dispatcher
+│   └── remote_cmd.py                      # SSH operational command runner
 ├── workflows/                             # n8n Orchestration workflows (.json)
 │   ├── MikroTik - Quota Threshold Monitor.json # Core quota tracking & alert pipeline
 │   ├── MikroTik - WAN Quality Ingestion.json   # Latency & packet loss processor
@@ -152,83 +173,191 @@ The project is cleanly structured into domain-specific modules:
 
 ---
 
-## 🚀 Quickstart Guide
+## ⚙️ Core Subsystems
 
-### 1. Database Initialization
-Deploy PostgreSQL (version 15+ recommended) and initialize the schema:
-```bash
-# Set up database and tables
-psql -h <DB_HOST> -U <DB_USER> -d <DB_NAME> -f database/schema.sql
-```
+### 1. Dual-WAN Quota Engine
+- **Byte-Accurate Delta Tracking**: Reads cumulative `rx-byte` and `tx-byte` counters from RouterOS interfaces, accounting for router reboots and counter resets.
+- **Three-Tier Threshold State Machine**: Evaluates status on every cycle and generates alerts at:
+  - **80% (Warning)**: Early notification with projected days remaining at current burn rate.
+  - **95% (Critical)**: Imminent exhaustion alert recommending bandwidth throttling.
+  - **100% (Exhaustion)**: Triggers policy-based routing isolation to prevent overage.
+- **Deduplication Logic**: State recorded in `quota_alert_state` ensures alerts are sent once per threshold per monthly cycle.
 
-### 2. Configure Environment Variables
-Copy `.env.example` to `.env` and fill in your credentials:
+### 2. Policy-Based Routing (PBR) Isolation
+- Implemented in [`routeros/wan_control_pbr.rsc`](file:///d:/Work/MikroTik%20-%20Quota%20Threshold%20Monitor/routeros/wan_control_pbr.rsc) and [`routeros/wccp_control.rsc`](file:///d:/Work/MikroTik%20-%20Quota%20Threshold%20Monitor/routeros/wccp_control.rsc).
+- Utilizes RouterOS v7 routing tables (`to_WAN1`, `to_WAN2`) and connection marks.
+- **Survivor Check**: Ensures that before an exhausted link is isolated, the remaining uplink is verified online, preventing accidental total network blackout.
+
+### 3. ISP SLA Outage & Dispute Ledger
+- Implemented in [`routeros/wan_quality.rsc`](file:///d:/Work/MikroTik%20-%20Quota%20Threshold%20Monitor/routeros/wan_quality.rsc).
+- Sends periodic 3-packet ICMP probes to external gateways (e.g., `8.8.8.8`, `1.1.1.1`).
+- Records min/avg/max latency, jitter, and packet loss in `mikrotik_wan_quality`.
+- Detects continuous packet loss and logs outage intervals into `wan_outage_events` to provide proof for ISP customer support compensation requests.
+
+### 4. Hotspot Session Analytics
+- Implemented in [`routeros/hotspot_telemetry.rsc`](file:///d:/Work/MikroTik%20-%20Quota%20Threshold%20Monitor/routeros/hotspot_telemetry.rsc).
+- Batches active client data: IP address, MAC address, uptime, bytes in/out, and voucher profile.
+- Detects top consumers and tracks voucher expiration in real-time.
+
+### 5. Interactive Telegram Operations Bot
+- Implemented in [`bot/telegram_bot_daemon.py`](file:///d:/Work/MikroTik%20-%20Quota%20Threshold%20Monitor/bot/telegram_bot_daemon.py) and [`bot/telegram_bot_daemon_oci.py`](file:///d:/Work/MikroTik%20-%20Quota%20Threshold%20Monitor/bot/telegram_bot_daemon_oci.py).
+- Zero external framework dependencies (uses `requests` and `psycopg2-binary`).
+- Features interactive reply keyboard markup in Arabic and English for rapid network diagnostics without typing commands.
+
+### 6. Automated Telemetry Retention Engine
+- Implemented in [`maintenance/prune_telemetry.py`](file:///d:/Work/MikroTik%20-%20Quota%20Threshold%20Monitor/maintenance/prune_telemetry.py).
+- Non-locking, bounded chunked deletion (1,000 rows per transaction) to prevent table locks on high-write production databases.
+- Retention windows: 14 days for high-frequency ICMP pings, 30 days for Hotspot user sessions.
+
+### 7. Zero-Touch Grafana Dashboards
+- Pre-configured provisioning stack in [`provisioning/`](file:///d:/Work/MikroTik%20-%20Quota%20Threshold%20Monitor/provisioning).
+- Launches instantly with `docker compose -f docker-compose.monitoring.yml up -d` with pre-wired PostgreSQL queries for live bandwidth gauges, daily usage histograms, and latency percentiles.
+
+---
+
+## 🤖 Telegram Bot Command Reference
+
+The Telegram Daemon provides both command-based and on-screen button interactions:
+
+| Command | Button (Arabic) | Function | Description |
+|---|---|---|---|
+| `/status` | 📊 حالة الباقات | **Package Balance** | Shows real-time usage, remaining GBs, and percent used for WAN1 & WAN2 |
+| `/failover` | 🔀 تشخيص الفيل-أوفر | **Failover Diagnostic** | Evaluates latency, packet loss, and routing table health across both uplinks |
+| `/hotspot` | 👥 مستخدمي الهوتسبوت | **Hotspot Analytics** | Displays active user sessions, top bandwidth consumers, and uptime |
+| `/claim` | 📝 مطالبة تعويض | **ISP Claim Generator** | Compiles recent outage timestamps and durations formatted for ISP escalation |
+| `/help` | ❓ المساعدة | **Command List** | Displays available commands and administrative instructions |
+
+---
+
+## 🚀 Step-by-Step Quickstart
+
+### Step 1: Clone & Configure Environment
+
+Clone the repository and prepare your environment settings:
 ```bash
+git clone https://github.com/geocanal/MikroTik-Quota-Threshold-Monitor.git
+cd MikroTik-Quota-Threshold-Monitor
 cp .env.example .env
 ```
-Key variables:
-- `TELEGRAM_BOT_TOKEN`: Token obtained from [@BotFather](https://t.me/BotFather).
-- `TELEGRAM_ADMIN_CHAT_ID`: Your numerical Telegram user/chat ID.
-- `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`: PostgreSQL connection settings.
 
-### 3. Deploy RouterOS Scripts
-1. Open RouterOS WinBox or SSH terminal.
-2. Review and import scripts from the `routeros/` directory:
-   - `routeros/wan_quality.rsc`: Schedule every 1-2 minutes to push latency probes to n8n webhook.
-   - `routeros/hotspot_telemetry.rsc`: Schedule every 5-15 minutes to record active client usage.
-   - `routeros/wan_control_pbr.rsc`: Configures routing tables and isolation marks.
+Edit `.env` with your secure configuration:
+```env
+TELEGRAM_BOT_TOKEN=123456789:ABCdefGhIJKlmNoPQRsTUVwxyZ_example
+TELEGRAM_ADMIN_CHAT_ID=123456789
+GRAFANA_ADMIN_USER=admin
+GRAFANA_ADMIN_PASSWORD=admin
+GRAFANA_PORT=3000
+DB_HOST=127.0.0.1
+DB_PORT=5432
+DB_NAME=mikrotik_db
+DB_USER=mikrotik
+DB_PASSWORD=your_secure_password
+```
 
-### 4. Import n8n Workflows
-1. In your n8n instance, navigate to **Workflows -> Import from File**.
-2. Import the workflows from the `workflows/` directory:
-   - `workflows/MikroTik - Quota Threshold Monitor.json`
-   - `workflows/MikroTik - WAN Quality Ingestion.json`
-   - `workflows/MikroTik - Hotspot Ingestion.json`
-3. Configure PostgreSQL credentials in n8n and activate workflows.
+### Step 2: Database Initialization
 
-### 5. Launch Grafana Monitoring
-Start the Grafana visualization container:
+Create your PostgreSQL database (version 15+ recommended) and apply the complete DDL:
+```bash
+psql -h $DB_HOST -U $DB_USER -d $DB_NAME -f database/schema.sql
+```
+
+### Step 3: Deploy RouterOS Scripts
+
+1. Connect to your MikroTik router via WinBox or SSH.
+2. Upload and install the scripts from [`routeros/`](file:///d:/Work/MikroTik%20-%20Quota%20Threshold%20Monitor/routeros):
+   - **`routeros/wan_quality.rsc`**: Add to `/system script` and schedule every 2 minutes:
+     ```routeros
+     /system scheduler add name="schedule-wan-quality" interval=2m on-event=probe_wan_quality
+     ```
+   - **`routeros/hotspot_telemetry.rsc`**: Add to `/system script` and schedule every 5 minutes:
+     ```routeros
+     /system scheduler add name="schedule-hotspot-telemetry" interval=5m on-event=push_hotspot_telemetry
+     ```
+   - **`routeros/wan_control_pbr.rsc`**: Import routing tables and mangle rules:
+     ```routeros
+     /import file-name=wan_control_pbr.rsc
+     ```
+
+### Step 4: Import n8n Orchestration Workflows
+
+1. Open your n8n web dashboard.
+2. Navigate to **Workflows -> Import from File** and import:
+   - [`workflows/MikroTik - Quota Threshold Monitor.json`](file:///d:/Work/MikroTik%20-%20Quota%20Threshold%20Monitor/workflows/MikroTik%20-%20Quota%20Threshold%20Monitor.json)
+   - [`workflows/MikroTik - WAN Quality Ingestion.json`](file:///d:/Work/MikroTik%20-%20Quota%20Threshold%20Monitor/workflows/MikroTik%20-%20WAN%20Quality%20Ingestion.json)
+   - [`workflows/MikroTik - Hotspot Ingestion.json`](file:///d:/Work/MikroTik%20-%20Quota%20Threshold%20Monitor/workflows/MikroTik%20-%20Hotspot%20Ingestion.json)
+3. Connect your PostgreSQL credentials in n8n and toggle each workflow to **Active**.
+
+### Step 5: Launch Grafana Observability
+
+Start the provisioned monitoring container:
 ```bash
 docker compose -f docker-compose.monitoring.yml up -d
 ```
-Access Grafana at `http://localhost:3000` (default credentials: `admin` / `admin`). Pre-configured dashboards will load automatically.
+Access Grafana at `http://localhost:3000` (default: `admin` / `admin`). The **MikroTik Overview** and **Hotspot Overview** dashboards load automatically with zero manual setup.
 
-### 6. Run the Telegram Bot Daemon
+### Step 6: Start the Telegram Bot Daemon
+
 Install Python dependencies and start the daemon:
 ```bash
 pip install requests psycopg2-binary
 python bot/telegram_bot_daemon.py
 ```
-For production Linux servers, a systemd unit file can be configured to manage the bot daemon persistently via `bot/install_bot_service.py`.
 
-### 7. Telemetry Retention Engine
-Schedule periodic cleanup of historical high-frequency logs:
+*For Linux server deployments*, install as a systemd service:
 ```bash
-# Add to crontab (runs daily at 03:00)
-0 3 * * * /usr/bin/python3 /path/to/maintenance/prune_telemetry.py >> /var/log/prune_telemetry.log 2>&1
+python bot/install_bot_service.py
+sudo systemctl enable --now mikrotik-telegram-bot
+```
+
+### Step 7: Schedule Automated Maintenance
+
+Add the telemetry pruning job to the server crontab to prevent disk bloat:
+```bash
+# Run daily at 03:00 AM
+0 3 * * * /usr/bin/python3 /path/to/MikroTik-Quota-Threshold-Monitor/maintenance/prune_telemetry.py >> /var/log/prune_telemetry.log 2>&1
+```
+
+---
+
+## 🧪 Verification & Testing
+
+The repository includes a comprehensive test suite to ensure system stability:
+
+```bash
+# 1. Run retention engine unit tests
+python -m unittest maintenance/test_prune_telemetry.py
+
+# 2. Run offline quota alert dry-run tests
+python -m unittest tests/test_quota_alert_dry_run.py
+
+# 3. Verify codebase navigation maps and detect drift
+python .agents/scripts/validate_codebase_map.py
 ```
 
 ---
 
 ## 🛡️ Security & Privacy
 
-- **Decoupled Secrets**: All passwords, API tokens, and chat IDs are strictly loaded from environment variables or local `.env` files (ignored in `.gitignore`).
-- **Anonymized Configurations**: Example scripts and documentation use RFC-5737 documentation IP ranges (`198.51.100.x`) and generic placeholder domains (`example.com`).
-- **Sanitized Git History**: Clean commit history vetted against exposed credentials.
+- **Zero-Secret Guarantee**: No API keys, bot tokens, or passwords are hardcoded in the codebase.
+- **Decoupled Configuration**: All credentials reside in `.env` files protected by `.gitignore` and restrictive file permissions (`chmod 600`).
+- **RFC-5737 Compliant**: All public documentation, diagrams, and example configurations use reserved test IP addresses (`198.51.100.x`) and `example.com`.
+- **Sanitized Git History**: Clean commit history vetted against secret scanners.
 
 ---
 
 ## 🤝 Contributing
 
-Contributions, issues, and feature requests are welcome!
-1. Fork the Project.
-2. Create your Feature Branch (`git checkout -b feature/AmazingFeature`).
-3. Commit your Changes (`git commit -m 'feat: add some amazing feature'`).
-4. Push to the Branch (`git push origin feature/AmazingFeature`).
-5. Open a Pull Request.
+Contributions are welcome! Please follow these steps:
+
+1. Fork the repository.
+2. Create your feature branch (`git checkout -b feature/NewFeature`).
+3. Commit your changes (`git commit -m 'feat: add NewFeature'`).
+4. Run all unit tests and the navigation validator (`python .agents/scripts/validate_codebase_map.py`).
+5. Push to the branch (`git push origin feature/NewFeature`).
+6. Submit a Pull Request.
 
 ---
 
 ## 📄 License
 
-Distributed under the MIT License. See [`LICENSE`](LICENSE) for more details.
+This project is licensed under the MIT License - see the [`LICENSE`](file:///d:/Work/MikroTik%20-%20Quota%20Threshold%20Monitor/LICENSE) file for details.
