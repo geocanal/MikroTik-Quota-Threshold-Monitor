@@ -1,0 +1,34 @@
+services:
+  grafana:
+    image: grafana/grafana:latest
+    container_name: mikrotik-grafana
+    restart: unless-stopped
+    ports:
+      - "${GRAFANA_PORT:-3000}:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin}
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_INSTALL_PLUGINS=
+      - DB_HOST=${DB_HOST:-campaign-postgres}
+      - DB_PORT=${DB_PORT:-5432}
+      - DB_NAME=${DB_NAME:-campaign_db}
+      - DB_USER=${DB_USER:-postgres}
+      - DB_PASSWORD=${DB_PASSWORD:-password}
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./provisioning/datasources:/etc/grafana/provisioning/datasources:ro
+      - ./provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./provisioning/dashboards/mikrotik-overview.json:/var/lib/grafana/dashboards/mikrotik-overview.json:ro
+      - ./provisioning/dashboards/hotspot-overview.json:/var/lib/grafana/dashboards/hotspot-overview.json:ro
+    networks:
+      - monitoring_network
+
+volumes:
+  grafana_data:
+    driver: local
+
+networks:
+  monitoring_network:
+    name: campaign-network
+    external: true

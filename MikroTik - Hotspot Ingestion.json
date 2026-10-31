@@ -1,0 +1,177 @@
+{
+  "name": "MikroTik - Hotspot Ingestion",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "mikrotik/hotspot-telemetry",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        900,
+        400
+      ],
+      "id": "wh-hotspot-001",
+      "name": "Hotspot Webhook",
+      "webhookId": "b89f1d0a-9d2a-4f51-b841-hotspot001"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Accepts batch payloads from the new script as well as legacy single payloads\nconst raw = $input.first()?.json?.body || $input.first()?.json || {};\n\nconst routerId = raw.router_id || 'Unknown-Router';\nconst routerUptime = raw.uptime || null;\nconst recordedAt = new Date().toISOString();\n\nconst users = Array.isArray(raw.users) ? raw.users : [];\n// Supports both 'sessions' (minified) and 'active_sessions' (legacy)\nconst activeSessions = Array.isArray(raw.sessions) ? raw.sessions : (Array.isArray(raw.active_sessions) ? raw.active_sessions : []);\n\n// Build session lookup index\nconst activeMap = new Map();\nfor (const s of activeSessions) {\n  const uKey = s.user || s.name;\n  if (!uKey) continue;\n  if (!activeMap.has(uKey)) {\n    activeMap.set(uKey, []);\n  }\n  activeMap.get(uKey).push({\n    ip_address: s.ip || s.address || null,\n    mac_address: s.mac || s.mac_address || null,\n    session_uptime: s.uptime || null,\n    rx_bytes: Number(s.rx !== undefined ? s.rx : (s.bytes_in || 0)),\n    tx_bytes: Number(s.tx !== undefined ? s.tx : (s.bytes_out || 0))\n  });\n}\n\nconst MB = 1024 * 1024;\nconst GB = 1024 * 1024 * 1024;\n\nconst processedBatch = users.map(u => {\n  // Support minified keys (rx, tx, limit) and legacy keys (bytes_in, bytes_out, limit_bytes_total)\n  const rxBytes = Number(u.rx !== undefined ? u.rx : (u.bytes_in || 0));\n  const txBytes = Number(u.tx !== undefined ? u.tx : (u.bytes_out || 0));\n  const totalUsedBytes = rxBytes + txBytes;\n  const limitTotalBytes = Number(u.limit !== undefined ? u.limit : (u.limit_bytes_total || 0));\n  const hasLimit = limitTotalBytes > 0;\n\n  let remainingBytes = 0;\n  let usedPercentage = 0;\n\n  if (hasLimit) {\n    remainingBytes = Math.max(0, limitTotalBytes - totalUsedBytes);\n    usedPercentage = Number(Math.min(100, (totalUsedBytes / limitTotalBytes) * 100).toFixed(2));\n  }\n\n  const sessions = activeMap.get(u.name) || [];\n  const primarySession = sessions[0] || null;\n\n  return {\n    router_id: routerId,\n    user_name: u.name,\n    profile: u.profile || null,\n    comment: u.comment || null,\n    is_active: sessions.length > 0,\n    active_connections_count: sessions.length,\n    ip_address: primarySession?.ip_address || null,\n    mac_address: primarySession?.mac_address || null,\n    session_uptime: primarySession?.session_uptime || null,\n    \n    // Counters\n    bytes_in: rxBytes,\n    bytes_out: txBytes,\n    total_bytes: totalUsedBytes,\n    limit_bytes_total: limitTotalBytes,\n    remaining_bytes: remainingBytes,\n\n    // Metrics (2 decimal precision)\n    total_mb: Number((totalUsedBytes / MB).toFixed(2)),\n    total_gb: Number((totalUsedBytes / GB).toFixed(2)),\n    limit_gb: hasLimit ? Number((limitTotalBytes / GB).toFixed(2)) : null,\n    remaining_gb: hasLimit ? Number((remainingBytes / GB).toFixed(2)) : null,\n    used_percentage: usedPercentage,\n\n    // Threshold classification\n    alert_tier: usedPercentage >= 100 ? '100%' : (usedPercentage >= 80 ? '80%' : 'NORMAL'),\n    recorded_at: recordedAt\n  };\n});\n\nreturn processedBatch.map(item => ({ json: item }));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1120,
+        400
+      ],
+      "id": "code-normalize-hotspot-002",
+      "name": "Normalize & Calculate Quota"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO hotspot_user_telemetry (\n    router_id,\n    user_name,\n    profile,\n    comment,\n    is_active,\n    active_connections_count,\n    ip_address,\n    mac_address,\n    session_uptime,\n    bytes_in,\n    bytes_out,\n    total_bytes,\n    limit_bytes_total,\n    remaining_bytes,\n    total_mb,\n    total_gb,\n    limit_gb,\n    remaining_gb,\n    used_percentage,\n    alert_tier,\n    recorded_at\n)\nVALUES (\n    $1, $2, $3, $4, $5, $6, $7::inet, $8::macaddr, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21\n);",
+        "options": {
+          "queryReplacement": "={{ [\n  $json.router_id,\n  $json.user_name,\n  $json.profile,\n  $json.comment,\n  $json.is_active,\n  $json.active_connections_count,\n  $json.ip_address,\n  $json.mac_address,\n  $json.session_uptime,\n  $json.bytes_in,\n  $json.bytes_out,\n  $json.total_bytes,\n  $json.limit_bytes_total,\n  $json.remaining_bytes,\n  $json.total_mb,\n  $json.total_gb,\n  $json.limit_gb,\n  $json.remaining_gb,\n  $json.used_percentage,\n  $json.alert_tier,\n  $json.recorded_at\n] }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        1340,
+        400
+      ],
+      "id": "pg-store-hotspot-003",
+      "name": "Store Hotspot Snapshots",
+      "credentials": {
+        "postgres": {
+          "id": "XKwdrIadj1gSLirP",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $('Normalize & Calculate Quota').item.json.alert_tier }}",
+              "operation": "notEqual",
+              "value2": "NORMAL"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        1560,
+        400
+      ],
+      "id": "if-hotspot-threshold-004",
+      "name": "Exceeded 80% or 100%?"
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $('Normalize & Calculate Quota').item.json;\nconst isExhausted = item.alert_tier === '100%';\n\nconst title = isExhausted \n  ? '🚨 <b>إنذار: نفاد كوتا مستخدم هوتسبوت بالكامل (100%)</b>'\n  : '⚠️ <b>تنبيه: اقتراب نفاد كوتا مستخدم هوتسبوت (80%)</b>';\n\nlet msg = `${title}\\n\\n`;\nmsg += `👤 المستخدم: <b>${item.user_name}</b>\\n`;\nmsg += `🏷️ البروفايل: <code>${item.profile || 'Default'}</code>\\n`;\nmsg += `🖥️ الراوتر: <code>${item.router_id}</code>\\n`;\nmsg += `📊 الاستهلاك: <b>${item.used_percentage}%</b> (${item.total_gb} GB / ${item.limit_gb} GB)\\n`;\nmsg += `📉 المتبقي: <b>${item.remaining_gb} GB</b>\\n`;\nif (item.ip_address) {\n  msg += `🌐 العنوان: <code>${item.ip_address}</code> (${item.mac_address})\\n`;\n}\nif (item.comment) {\n  msg += `📝 ملاحظة: <i>${item.comment}</i>\\n`;\n}\nmsg += `📅 التوقيت: <code>${new Date(item.recorded_at).toLocaleString('ar-EG', { timeZone: 'Africa/Cairo' })}</code>`;\n\nreturn [{\n  json: {\n    ...item,\n    telegram_alert: msg\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1780,
+        320
+      ],
+      "id": "code-format-hotspot-alert-005",
+      "name": "Format User Alert"
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $env.TELEGRAM_ADMIN_CHAT_ID || '123456789' }}",
+        "text": "={{ $json.telegram_alert }}",
+        "additionalFields": {
+          "parse_mode": "HTML"
+        }
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        2000,
+        320
+      ],
+      "id": "tg-send-hotspot-alert-006",
+      "name": "Send Hotspot Alert Telegram",
+      "credentials": {
+        "telegramApi": {
+          "id": "ZGNboDpUiilvCAy8",
+          "name": "Telegram account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Hotspot Webhook": {
+      "main": [
+        [
+          {
+            "node": "Normalize & Calculate Quota",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize & Calculate Quota": {
+      "main": [
+        [
+          {
+            "node": "Store Hotspot Snapshots",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Store Hotspot Snapshots": {
+      "main": [
+        [
+          {
+            "node": "Exceeded 80% or 100%?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Exceeded 80% or 100%?": {
+      "main": [
+        [
+          {
+            "node": "Format User Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format User Alert": {
+      "main": [
+        [
+          {
+            "node": "Send Hotspot Alert Telegram",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": []
+}

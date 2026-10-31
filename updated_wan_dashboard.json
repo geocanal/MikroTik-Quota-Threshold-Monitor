@@ -1,0 +1,689 @@
+{
+  "dashboard": {
+    "annotations": {
+      "list": [
+        {
+          "builtIn": 1,
+          "datasource": {
+            "type": "grafana",
+            "uid": "-- Grafana --"
+          },
+          "enable": true,
+          "hide": true,
+          "name": "Annotations & Alerts",
+          "type": "dashboard"
+        }
+      ]
+    },
+    "editable": true,
+    "fiscalYearStartMonth": 0,
+    "graphTooltip": 1,
+    "id": 1096088618721280,
+    "links": [],
+    "liveNow": false,
+    "panels": [
+      {
+        "datasource": {
+          "type": "postgres",
+          "uid": "PCC52D03280B7034C"
+        },
+        "fieldConfig": {
+          "defaults": {
+            "max": 100,
+            "min": 0,
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {
+                  "color": "green",
+                  "value": null
+                },
+                {
+                  "color": "#EAB839",
+                  "value": 80
+                },
+                {
+                  "color": "red",
+                  "value": 95
+                }
+              ]
+            },
+            "unit": "percent"
+          },
+          "overrides": []
+        },
+        "gridPos": {
+          "h": 7,
+          "w": 12,
+          "x": 0,
+          "y": 0
+        },
+        "id": 1,
+        "options": {
+          "reduceOptions": {
+            "calcs": [
+              "lastNotNull"
+            ],
+            "fields": "/used_pct/",
+            "values": true
+          },
+          "showThresholdLabels": true,
+          "showThresholdMarkers": true
+        },
+        "targets": [
+          {
+            "format": "table",
+            "rawQuery": true,
+            "rawSql": "SELECT CASE interface_name WHEN 'wan1' THEN 'Vodafone DSL (WAN1)' WHEN 'wan2' THEN 'WE Egypt (WAN2)' ELSE UPPER(interface_name) END AS isp, used_percentage::float AS used_pct FROM view_mikrotik_wan_quota_status ORDER BY interface_name;",
+            "refId": "A"
+          }
+        ],
+        "title": "WAN1 & WAN2 Quota Usage (%)",
+        "type": "gauge"
+      },
+      {
+        "datasource": {
+          "type": "postgres",
+          "uid": "PCC52D03280B7034C"
+        },
+        "fieldConfig": {
+          "defaults": {
+            "unit": "decgbytes"
+          },
+          "overrides": []
+        },
+        "gridPos": {
+          "h": 7,
+          "w": 12,
+          "x": 12,
+          "y": 0
+        },
+        "id": 2,
+        "options": {
+          "legend": {
+            "displayMode": "list",
+            "placement": "right",
+            "showLegend": true
+          },
+          "pieType": "donut",
+          "reduceOptions": {
+            "calcs": [
+              "lastNotNull"
+            ],
+            "fields": "/value/",
+            "values": false
+          },
+          "tooltip": {
+            "mode": "single"
+          }
+        },
+        "targets": [
+          {
+            "format": "table",
+            "rawQuery": true,
+            "rawSql": "SELECT 'WAN1' AS metric, ROUND(COALESCE(SUM(wan1_rx_bytes + wan1_tx_bytes), 0)/(1024.0*1024.0*1024.0), 2) AS value FROM mikrotik_wan_usage WHERE $__timeFilter(usage_at) AND counter_reset = false UNION ALL SELECT 'WAN2' AS metric, ROUND(COALESCE(SUM(wan2_rx_bytes + wan2_tx_bytes), 0)/(1024.0*1024.0*1024.0), 2) AS value FROM mikrotik_wan_usage WHERE $__timeFilter(usage_at) AND counter_reset = false;",
+            "refId": "A"
+          }
+        ],
+        "title": "Traffic Distribution (WAN1 vs WAN2)",
+        "type": "piechart"
+      },
+      {
+        "datasource": {
+          "type": "postgres",
+          "uid": "PCC52D03280B7034C"
+        },
+        "fieldConfig": {
+          "defaults": {
+            "custom": {
+              "drawStyle": "line",
+              "fillOpacity": 10,
+              "lineInterpolation": "smooth",
+              "lineWidth": 2
+            },
+            "unit": "mbytes"
+          },
+          "overrides": []
+        },
+        "gridPos": {
+          "h": 7,
+          "w": 24,
+          "x": 0,
+          "y": 7
+        },
+        "id": 3,
+        "options": {
+          "legend": {
+            "calcs": [
+              "mean",
+              "max",
+              "sum"
+            ],
+            "displayMode": "table",
+            "placement": "bottom"
+          },
+          "tooltip": {
+            "mode": "multi"
+          }
+        },
+        "targets": [
+          {
+            "format": "time_series",
+            "rawQuery": true,
+            "rawSql": "SELECT usage_at AS time, ROUND((wan1_rx_bytes + wan1_tx_bytes)/(1024.0*1024.0), 2) AS wan1_mb, ROUND((wan2_rx_bytes + wan2_tx_bytes)/(1024.0*1024.0), 2) AS wan2_mb, ROUND(total_bytes/(1024.0*1024.0), 2) AS total_mb FROM mikrotik_wan_usage WHERE $__timeFilter(usage_at) AND counter_reset = false ORDER BY usage_at ASC;",
+            "refId": "A"
+          }
+        ],
+        "title": "Throughput / Bandwidth Consumption (MB per Sample)",
+        "type": "timeseries"
+      },
+      {
+        "datasource": {
+          "type": "postgres",
+          "uid": "PCC52D03280B7034C"
+        },
+        "fieldConfig": {
+          "defaults": {
+            "custom": {
+              "stacking": {
+                "group": "A",
+                "mode": "normal"
+              }
+            },
+            "unit": "decgbytes"
+          },
+          "overrides": []
+        },
+        "gridPos": {
+          "h": 7,
+          "w": 14,
+          "x": 0,
+          "y": 14
+        },
+        "id": 4,
+        "options": {
+          "legend": {
+            "displayMode": "list",
+            "placement": "bottom"
+          },
+          "tooltip": {
+            "mode": "multi"
+          },
+          "xField": "time"
+        },
+        "targets": [
+          {
+            "format": "table",
+            "rawQuery": true,
+            "rawSql": "SELECT (usage_date::timestamp AT TIME ZONE 'Africa/Cairo') AS time, wan1_total_gb AS wan1, wan2_total_gb AS wan2 FROM view_mikrotik_wan_daily_usage WHERE usage_date >= ((CURRENT_TIMESTAMP AT TIME ZONE 'Africa/Cairo')::date - INTERVAL '30 days') ORDER BY usage_date ASC;",
+            "refId": "A"
+          }
+        ],
+        "title": "Daily Consumption (GB) - Last 30 Days",
+        "type": "barchart"
+      },
+      {
+        "datasource": {
+          "type": "postgres",
+          "uid": "PCC52D03280B7034C"
+        },
+        "fieldConfig": {
+          "defaults": {},
+          "overrides": []
+        },
+        "gridPos": {
+          "h": 7,
+          "w": 10,
+          "x": 14,
+          "y": 14
+        },
+        "id": 5,
+        "options": {
+          "showHeader": true
+        },
+        "targets": [
+          {
+            "format": "table",
+            "rawQuery": true,
+            "rawSql": "SELECT UPPER(interface_name) AS interface, provider_name AS provider, quota_gb || ' GB' AS quota, used_gb || ' GB' AS used, remaining_gb || ' GB' AS remaining, used_percentage || '%' AS used_pct, daily_burn_rate_gb || ' GB/d' AS burn_rate, projected_exhaustion_date::text AS exhaustion_date, days_left || ' days (' || renewal_date || ')' AS renewal FROM view_mikrotik_wan_quota_status ORDER BY interface_name;",
+            "refId": "A"
+          }
+        ],
+        "title": "ISP Quota Cycle Summary",
+        "type": "table"
+      },
+      {
+        "collapsed": false,
+        "gridPos": {
+          "h": 1,
+          "w": 24,
+          "x": 0,
+          "y": 21
+        },
+        "id": 6,
+        "panels": [],
+        "title": "⚡ Live WAN Quality & ISP SLA Telemetry",
+        "type": "row"
+      },
+      {
+        "id": 7,
+        "title": "WAN Latency (RTT ms) - 24 Hours",
+        "type": "timeseries",
+        "datasource": {
+          "type": "postgres",
+          "uid": "PCC52D03280B7034C"
+        },
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 0,
+          "y": 22
+        },
+        "fieldConfig": {
+          "defaults": {
+            "custom": {
+              "drawStyle": "line",
+              "lineInterpolation": "smooth",
+              "lineWidth": 2,
+              "fillOpacity": 15
+            },
+            "unit": "ms",
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {
+                  "color": "green",
+                  "value": null
+                },
+                {
+                  "color": "#EAB839",
+                  "value": 50
+                },
+                {
+                  "color": "red",
+                  "value": 150
+                }
+              ]
+            }
+          },
+          "overrides": []
+        },
+        "options": {
+          "legend": {
+            "calcs": [
+              "mean",
+              "max",
+              "lastNotNull"
+            ],
+            "displayMode": "table",
+            "placement": "bottom"
+          },
+          "tooltip": {
+            "mode": "multi"
+          }
+        },
+        "targets": [
+          {
+            "format": "time_series",
+            "rawQuery": true,
+            "rawSql": "SELECT probed_at AS time, CASE WHEN UPPER(interface_name) = 'WAN1' THEN 'Vodafone (WAN1) RTT' ELSE 'WE (WAN2) RTT' END AS metric, latency_ms FROM mikrotik_wan_quality WHERE $__timeFilter(probed_at) ORDER BY probed_at ASC;",
+            "refId": "A"
+          }
+        ]
+      },
+      {
+        "id": 8,
+        "title": "Packet Loss (%) & Connection Degradation",
+        "type": "timeseries",
+        "datasource": {
+          "type": "postgres",
+          "uid": "PCC52D03280B7034C"
+        },
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 12,
+          "y": 22
+        },
+        "fieldConfig": {
+          "defaults": {
+            "custom": {
+              "drawStyle": "line",
+              "lineInterpolation": "linear",
+              "lineWidth": 2,
+              "fillOpacity": 25
+            },
+            "unit": "percent",
+            "min": 0,
+            "max": 100,
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {
+                  "color": "green",
+                  "value": null
+                },
+                {
+                  "color": "#EAB839",
+                  "value": 5
+                },
+                {
+                  "color": "red",
+                  "value": 25
+                }
+              ]
+            }
+          },
+          "overrides": []
+        },
+        "options": {
+          "legend": {
+            "calcs": [
+              "max",
+              "lastNotNull"
+            ],
+            "displayMode": "table",
+            "placement": "bottom"
+          },
+          "tooltip": {
+            "mode": "multi"
+          }
+        },
+        "targets": [
+          {
+            "format": "time_series",
+            "rawQuery": true,
+            "rawSql": "SELECT probed_at AS time, CASE WHEN UPPER(interface_name) = 'WAN1' THEN 'Vodafone (WAN1) Loss %' ELSE 'WE (WAN2) Loss %' END AS metric, packet_loss_percent FROM mikrotik_wan_quality WHERE $__timeFilter(probed_at) ORDER BY probed_at ASC;",
+            "refId": "A"
+          }
+        ]
+      },
+      {
+        "id": 9,
+        "title": "Monthly SLA Uptime (%)",
+        "type": "gauge",
+        "datasource": {
+          "type": "postgres",
+          "uid": "PCC52D03280B7034C"
+        },
+        "gridPos": {
+          "h": 6,
+          "w": 6,
+          "x": 0,
+          "y": 30
+        },
+        "fieldConfig": {
+          "defaults": {
+            "min": 95,
+            "max": 100,
+            "unit": "percent",
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {
+                  "color": "red",
+                  "value": null
+                },
+                {
+                  "color": "#EAB839",
+                  "value": 98
+                },
+                {
+                  "color": "green",
+                  "value": 99.5
+                }
+              ]
+            }
+          },
+          "overrides": []
+        },
+        "options": {
+          "reduceOptions": {
+            "calcs": [
+              "lastNotNull"
+            ],
+            "values": false
+          },
+          "showThresholdLabels": true,
+          "showThresholdMarkers": true
+        },
+        "targets": [
+          {
+            "format": "table",
+            "rawQuery": true,
+            "rawSql": "SELECT ROUND((100.0 - (COALESCE(SUM(duration_minutes), 0) / (EXTRACT(DAY FROM DATE_TRUNC('month', NOW()) + INTERVAL '1 month - 1 day') * 24.0 * 60.0) * 100.0))::numeric, 2) AS uptime_pct FROM wan_outage_events WHERE started_at >= DATE_TRUNC('month', NOW());",
+            "refId": "A"
+          }
+        ]
+      },
+      {
+        "id": 10,
+        "title": "Documented Downtime (Current Month)",
+        "type": "stat",
+        "datasource": {
+          "type": "postgres",
+          "uid": "PCC52D03280B7034C"
+        },
+        "gridPos": {
+          "h": 6,
+          "w": 6,
+          "x": 6,
+          "y": 30
+        },
+        "fieldConfig": {
+          "defaults": {
+            "unit": "m",
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {
+                  "color": "green",
+                  "value": null
+                },
+                {
+                  "color": "#EAB839",
+                  "value": 30
+                },
+                {
+                  "color": "red",
+                  "value": 60
+                }
+              ]
+            }
+          },
+          "overrides": []
+        },
+        "options": {
+          "colorMode": "value",
+          "graphMode": "none",
+          "justifyMode": "auto",
+          "reduceOptions": {
+            "calcs": [
+              "lastNotNull"
+            ],
+            "values": false
+          }
+        },
+        "targets": [
+          {
+            "format": "table",
+            "rawQuery": true,
+            "rawSql": "SELECT COALESCE(SUM(duration_minutes), 0) AS downtime_minutes FROM wan_outage_events WHERE started_at >= DATE_TRUNC('month', NOW());",
+            "refId": "A"
+          }
+        ]
+      },
+      {
+        "id": 11,
+        "title": "ISP Outage Audit & Legal Compensation Claims",
+        "type": "table",
+        "datasource": {
+          "type": "postgres",
+          "uid": "PCC52D03280B7034C"
+        },
+        "gridPos": {
+          "h": 6,
+          "w": 12,
+          "x": 12,
+          "y": 30
+        },
+        "fieldConfig": {
+          "defaults": {
+            "custom": {
+              "align": "auto"
+            }
+          },
+          "overrides": []
+        },
+        "options": {
+          "sortBy": [
+            {
+              "displayName": "Start Time",
+              "desc": true
+            }
+          ]
+        },
+        "targets": [
+          {
+            "format": "table",
+            "rawQuery": true,
+            "rawSql": "SELECT UPPER(interface_name) AS \"Line\", provider_name AS \"ISP\", started_at AS \"Start Time\", duration_minutes || ' min' AS \"Duration\", outage_cause AS \"Cause\", CASE WHEN email_sent THEN '✅ Dispatched (' || email_recipient || ')' ELSE '❌ Pending' END AS \"Claim Status\" FROM wan_outage_events ORDER BY started_at DESC LIMIT 5;",
+            "refId": "A"
+          }
+        ]
+      },
+      {
+        "collapsed": false,
+        "gridPos": {
+          "h": 1,
+          "w": 24,
+          "x": 0,
+          "y": 36
+        },
+        "id": 12,
+        "panels": [],
+        "title": "👥 Hotspot Network & Top Talkers",
+        "type": "row"
+      },
+      {
+        "id": 13,
+        "title": "Top Bandwidth Consumers (Cumulative)",
+        "type": "table",
+        "datasource": {
+          "type": "postgres",
+          "uid": "PCC52D03280B7034C"
+        },
+        "gridPos": {
+          "h": 8,
+          "w": 15,
+          "x": 0,
+          "y": 37
+        },
+        "fieldConfig": {
+          "defaults": {
+            "custom": {
+              "align": "auto"
+            }
+          },
+          "overrides": []
+        },
+        "options": {
+          "sortBy": [
+            {
+              "displayName": "Total (GB)",
+              "desc": true
+            }
+          ]
+        },
+        "targets": [
+          {
+            "format": "table",
+            "rawQuery": true,
+            "rawSql": "SELECT user_name AS \"User\", COALESCE(profile, '-') AS \"Profile\", ip_address AS \"IP\", ROUND(total_gb, 2) AS \"Total (GB)\", used_percentage || '%' AS \"Quota %\", CASE WHEN is_active THEN '🟢 Active Online' ELSE '⚪ Offline' END AS \"Session\", session_uptime AS \"Uptime\" FROM (SELECT DISTINCT ON (user_name) * FROM hotspot_user_telemetry ORDER BY user_name, recorded_at DESC) latest ORDER BY total_bytes DESC LIMIT 10;",
+            "refId": "A"
+          }
+        ]
+      },
+      {
+        "id": 14,
+        "title": "Hotspot Consumption Share by Profile",
+        "type": "piechart",
+        "datasource": {
+          "type": "postgres",
+          "uid": "PCC52D03280B7034C"
+        },
+        "gridPos": {
+          "h": 8,
+          "w": 9,
+          "x": 15,
+          "y": 37
+        },
+        "fieldConfig": {
+          "defaults": {
+            "unit": "decgbytes"
+          },
+          "overrides": []
+        },
+        "options": {
+          "legend": {
+            "displayMode": "table",
+            "placement": "right",
+            "values": [
+              "value",
+              "percent"
+            ]
+          },
+          "pieType": "pie",
+          "reduceOptions": {
+            "calcs": [
+              "lastNotNull"
+            ],
+            "values": false
+          },
+          "tooltip": {
+            "mode": "single"
+          }
+        },
+        "targets": [
+          {
+            "format": "table",
+            "rawQuery": true,
+            "rawSql": "SELECT COALESCE(profile, 'Default') AS metric, ROUND(SUM(total_gb), 2) AS value FROM (SELECT DISTINCT ON (user_name) * FROM hotspot_user_telemetry ORDER BY user_name, recorded_at DESC) latest GROUP BY 1 ORDER BY value DESC;",
+            "refId": "A"
+          }
+        ]
+      }
+    ],
+    "refresh": "1m",
+    "schemaVersion": 38,
+    "style": "dark",
+    "tags": [
+      "mikrotik",
+      "quota",
+      "network"
+    ],
+    "time": {
+      "from": "now-24h",
+      "to": "now"
+    },
+    "timepicker": {
+      "refresh_intervals": [
+        "5s",
+        "10s",
+        "30s",
+        "1m",
+        "5m",
+        "15m",
+        "30m",
+        "1h",
+        "2h",
+        "1d"
+      ]
+    },
+    "timezone": "Africa/Cairo",
+    "title": "MikroTik WAN Quota & Traffic Overview",
+    "uid": "mikrotik-wan-quota",
+    "version": 4
+  },
+  "overwrite": true
+}

@@ -1,0 +1,42 @@
+version: '3.8'
+
+services:
+  # Simulate the app-postgres-1 on app_default network
+  app-postgres-1:
+    image: postgres:16-alpine
+    container_name: test-app-postgres-persistent
+    environment:
+      POSTGRES_USER: campaign
+      POSTGRES_PASSWORD: campaign_pass
+      POSTGRES_DB: campaign_db
+      POSTGRES_INITDB_ARGS: "-c timezone=UTC"
+    volumes:
+      - pgdata_persistent:/var/lib/postgresql/data
+    networks:
+      - app_default
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U campaign -d campaign_db"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # Simulate the n8n service on both n8n and app_default
+  n8n-persistent:
+    image: node:20-alpine
+    container_name: test-n8n-persistent
+    command: sleep 3600
+    networks:
+      - n8n
+      - app_default
+    depends_on:
+      app-postgres-1:
+        condition: service_healthy
+
+networks:
+  n8n:
+    driver: bridge
+  app_default:
+    driver: bridge
+
+volumes:
+  pgdata_persistent:

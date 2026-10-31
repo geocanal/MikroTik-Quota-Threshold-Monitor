@@ -1,0 +1,61 @@
+version: '3.8'
+
+services:
+  # Simulate n8n service from patched Compose (using same image for testing)
+  n8n-sim:
+    image: node:20-alpine
+    container_name: test-n8n-compose-sim
+    command: sleep 3600
+    networks:
+      - n8n
+      - app_default
+    depends_on:
+      postgres-sim:
+        condition: service_healthy
+
+  # Simulate n8n's postgres (NOT the app postgres - different network)
+  postgres-sim:
+    image: postgres:16-alpine
+    container_name: test-postgres-compose-sim
+    environment:
+      POSTGRES_USER: n8ntest
+      POSTGRES_PASSWORD: n8ntest
+      POSTGRES_DB: n8ntest
+    networks:
+      - n8n
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U n8ntest"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    volumes:
+      - pgdata_compose:/var/lib/postgresql/data
+
+  # Simulate app-postgres-1 (on app_default, like production)
+  app-postgres-1:
+    image: postgres:16-alpine
+    container_name: test-app-postgres-compose
+    environment:
+      POSTGRES_USER: campaign
+      POSTGRES_PASSWORD: campaign_pass
+      POSTGRES_DB: campaign_db
+      POSTGRES_INITDB_ARGS: "-c timezone=UTC"
+    networks:
+      - app_default
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U campaign -d campaign_db"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    volumes:
+      - pgdata_app:/var/lib/postgresql/data
+
+networks:
+  n8n:
+    driver: bridge
+  app_default:
+    driver: bridge
+
+volumes:
+  pgdata_compose:
+  pgdata_app:

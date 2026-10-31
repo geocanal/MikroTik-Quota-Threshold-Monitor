@@ -1,0 +1,44 @@
+# Isolated test for Docker network separation issue
+# Reproduces: n8n cannot resolve 'app-postgres-1' because they're on different networks
+# Tests: Connecting containers across networks restores DNS resolution
+
+services:
+  # The "application" PostgreSQL - simulates app-postgres-1 on app_default network
+  app-postgres:
+    image: postgres:16-alpine
+    container_name: test-app-postgres
+    environment:
+      POSTGRES_USER: campaign
+      POSTGRES_PASSWORD: campaign_pass
+      POSTGRES_DB: campaign_db
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U campaign -d campaign_db"]
+      interval: 2s
+      timeout: 2s
+      retries: 10
+    networks:
+      - app_network
+    command: postgres -c log_connections=on
+
+  # The "n8n" container - simulates n8n on n8n_n8n network
+  n8n-sim:
+    image: node:20-alpine
+    container_name: test-n8n-sim
+    command: sleep infinity
+    networks:
+      - n8n_network
+    depends_on:
+      - app-postgres
+    # Note: n8n-sim is on n8n_network, app-postgres is on app_network
+    # This simulates the production separation issue
+
+networks:
+  n8n_network:
+    driver: bridge
+  app_network:
+    driver: bridge
+
+volumes:
+  pgdata:

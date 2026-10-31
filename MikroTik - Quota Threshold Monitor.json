@@ -1,0 +1,720 @@
+{
+  "name": "MikroTik - Quota Threshold Monitor",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "55 23 * * *"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        912,
+        832
+      ],
+      "id": "0e026a73-cd1a-4ba1-8540-2ecfd72fa9a4",
+      "name": "Daily at 11:55 PM"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT \n    d.router_id,\n    d.usage_date,\n    d.wan1_total_mb,\n    d.wan1_total_gb,\n    d.wan2_total_mb,\n    d.wan2_total_gb,\n    d.grand_total_mb,\n    d.grand_total_gb,\n    d.readings_count,\n    (\n        SELECT json_agg(q.*)\n        FROM view_mikrotik_wan_quota_status q\n        WHERE q.router_id = d.router_id\n    ) AS quota_info\nFROM view_mikrotik_wan_daily_usage d\nWHERE d.usage_date = (CURRENT_TIMESTAMP AT TIME ZONE 'Africa/Cairo')::date\nLIMIT 1;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        1136,
+        832
+      ],
+      "id": "78b01a41-41b7-4da4-8295-d2a7c313a496",
+      "name": "Get Today Usage",
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "XKwdrIadj1gSLirP",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first()?.json;\n\nif (!item || !item.usage_date) {\n  return [{\n    json: {\n      message: \"⚠️ <b>تقرير الإنترنت اليومي</b>\\n\\nلا توجد قراءات مسجلة لليوم حتى الآن.\"\n    }\n  }];\n}\n\nconst dateStr = item.usage_date.split('T')[0];\nconst quotas = item.quota_info || [];\n\nconst qWan1 = quotas.find(q => q.interface_name === 'wan1') || {};\nconst qWan2 = quotas.find(q => q.interface_name === 'wan2') || {};\n\nfunction progressBar(usedPct) {\n  const totalBars = 10;\n  const filledBars = Math.min(totalBars, Math.max(0, Math.round((Number(usedPct) || 0) / 10)));\n  const emptyBars = totalBars - filledBars;\n  return '▓'.repeat(filledBars) + '░'.repeat(emptyBars);\n}\n\nlet msg = `📊 <b>تقرير استهلاك الإنترنت اليومي والكوتا</b>\\n`;\nmsg += `📅 التاريخ: <code>${dateStr}</code> | 🖥️ <code>${item.router_id}</code>\\n`;\nmsg += `━━━━━━━━━━━━━━━━━━━━━\\n\\n`;\n\n// Helper: Format exhaustion alert text\nfunction exhaustionInfo(q) {\n  let line = '';\n  if (q.operational_state && q.operational_state !== 'NORMAL') {\n    const badge = q.operational_state === 'ISOLATED' ? '🔴 معزول (ISOLATED)' : '🟡 مقيد (THROTTLED)';\n    line += '  • الحالة التشغيلية: <b>' + badge + '</b>\\n';\n  }\n  if (!q.daily_burn_rate_gb || Number(q.daily_burn_rate_gb) <= 0) return line;\n  line += '  • معدل الحرق: <b>' + q.daily_burn_rate_gb + ' GB/يوم</b>\\n';\n  if (q.will_exhaust_before_renewal) {\n    line += '  • ⚠️ <b>توقع النفاد: ' + q.projected_exhaustion_date + '</b> (قبل التجديد بـ ' + (q.days_left - q.days_until_exhaustion) + ' يوم!)\\n';\n  } else {\n    line += '  • 🎯 توقع النفاد: ' + q.projected_exhaustion_date + ' (آمن حتى التجديد)\\n';\n  }\n  return line;\n}\n\n// تفاصيل WAN1\nmsg += `🌐 <b>WAN1 (${qWan1.provider_name || 'Interface 1'}):</b>\\n`;\nmsg += `  • استهلاك اليوم: <b>${item.wan1_total_gb} GB</b> (${item.wan1_total_mb} MB)\\n`;\nif (qWan1.quota_gb) {\n  msg += `  • رصيد الباقة: [${progressBar(qWan1.used_percentage)}] ${qWan1.used_percentage}%\\n`;\n  msg += `  • المتبقي: <b>${qWan1.remaining_gb} GB</b> من أصل ${qWan1.quota_gb} GB\\n`;\n  msg += `  • التجديد: بعد <b>${qWan1.days_left} يوم</b> (${qWan1.renewal_date})\\n`;\n  msg += exhaustionInfo(qWan1);\n}\nmsg += `\\n`;\n\n// تفاصيل WAN2\nmsg += `🌐 <b>WAN2 (${qWan2.provider_name || 'Interface 2'}):</b>\\n`;\nmsg += `  • استهلاك اليوم: <b>${item.wan2_total_gb} GB</b> (${item.wan2_total_mb} MB)\\n`;\nif (qWan2.quota_gb) {\n  msg += `  • رصيد الباقة: [${progressBar(qWan2.used_percentage)}] ${qWan2.used_percentage}%\\n`;\n  msg += `  • المتبقي: <b>${qWan2.remaining_gb} GB</b> من أصل ${qWan2.quota_gb} GB\\n`;\n  msg += `  • التجديد: بعد <b>${qWan2.days_left} يوم</b> (${qWan2.renewal_date})\\n`;\n  msg += exhaustionInfo(qWan2);\n}\nmsg += `\\n━━━━━━━━━━━━━━━━━━━━━\\n`;\nmsg += `📈 <b>إجمالي اليوم الكلي:</b> <b>${item.grand_total_gb} GB</b> (${item.grand_total_mb} MB)\\n`;\nmsg += `🔢 عدد دورات الفحص: ${item.readings_count}`;\n\nreturn [{\n  json: {\n    message: msg\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1360,
+        832
+      ],
+      "id": "d5afabdc-8594-4a19-90ee-1ff2c764b52d",
+      "name": "Format Telegram Message"
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $env.TELEGRAM_ADMIN_CHAT_ID || '123456789' }}",
+        "text": "={{ $json.message }}",
+        "additionalFields": {
+          "parse_mode": "HTML"
+        }
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1584,
+        832
+      ],
+      "id": "3396a20d-860a-4d2c-9df4-f6c64681c316",
+      "name": "Send Telegram Report",
+      "webhookId": "0e3ad90b-3ffe-4f4c-8518-ec80c4aa88cb",
+      "credentials": {
+        "telegramApi": {
+          "id": "ZGNboDpUiilvCAy8",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first().json;\nconst routerId = $('Calculate WAN Delta').first().json.router_id;\n\nif (!item) return [];\n\nlet alerts = [];\nconst nowIso = new Date().toISOString();\n\nfunction formatCairo(dateObj) {\n  if (!dateObj) return 'غير محدد';\n  return new Date(dateObj).toLocaleString('ar-EG', {\n    timeZone: 'Africa/Cairo',\n    year: 'numeric', month: '2-digit', day: '2-digit',\n    hour: '2-digit', minute: '2-digit', second: '2-digit'\n  });\n}\n\nfunction buildCompensationEmail(provider, landline, holder, startAt, endAt, durationMin) {\n  const hours = Math.floor(durationMin / 60);\n  const mins = durationMin % 60;\n  const durationText = hours > 0 ? `${hours} ساعة و ${mins} دقيقة` : `${mins} دقيقة`;\n  const startStr = formatCairo(startAt);\n  const endStr = formatCairo(endAt);\n\n  const subject = `شكوى انقطاع خدمة الإنترنت والمطالبة بالتعويض - خط رقم: ${landline}`;\n  \n  const html = `\n  <div dir=\"rtl\" style=\"font-family: Arial, Tahoma, sans-serif; line-height: 1.8; color: #222; max-width: 650px; margin: auto; padding: 20px; border: 1px solid #e0e0e0; border-radius: 8px;\">\n    <h2 style=\"color: #b71c1c; border-bottom: 2px solid #b71c1c; padding-bottom: 8px; margin-top: 0;\">\n      عناية السادة / خدمة عملاء وشكاوى ${provider} المحترمين\n    </h2>\n    <p style=\"font-size: 15px;\">تحية طيبة وبعد،،،</p>\n    <p style=\"font-size: 15px;\">\n      أحيط سيادتكم علماً بحدوث <b>انقطاع كامل في خدمة الإنترنت المنزلي</b> على الخط الأرضي الخاص بي، وتجدون أدناه تفاصيل مدة وفترة الانقطاع بالتحديد:\n    </p>\n    \n    <table style=\"width: 100%; border-collapse: collapse; margin: 15px 0; font-size: 14px;\">\n      <tr style=\"background-color: #f7f7f7;\">\n        <td style=\"padding: 10px; border: 1px solid #ddd; font-weight: bold; width: 35%;\">اسم صاحب التعاقد:</td>\n        <td style=\"padding: 10px; border: 1px solid #ddd;\">${holder}</td>\n      </tr>\n      <tr>\n        <td style=\"padding: 10px; border: 1px solid #ddd; font-weight: bold;\">رقم التليفون الأرضي:</td>\n        <td style=\"padding: 10px; border: 1px solid #ddd; font-weight: bold; color: #0d47a1;\">${landline}</td>\n      </tr>\n      <tr style=\"background-color: #f7f7f7;\">\n        <td style=\"padding: 10px; border: 1px solid #ddd; font-weight: bold;\">توقيت بدء الانقطاع:</td>\n        <td style=\"padding: 10px; border: 1px solid #ddd; color: #c62828;\">${startStr}</td>\n      </tr>\n      <tr>\n        <td style=\"padding: 10px; border: 1px solid #ddd; font-weight: bold;\">توقيت استعادة الخدمة:</td>\n        <td style=\"padding: 10px; border: 1px solid #ddd; color: #2e7d32;\">${endStr}</td>\n      </tr>\n      <tr style=\"background-color: #f7f7f7;\">\n        <td style=\"padding: 10px; border: 1px solid #ddd; font-weight: bold;\">إجمالي فترة التوقف:</td>\n        <td style=\"padding: 10px; border: 1px solid #ddd; font-weight: bold; color: #b71c1c;\">${durationText} (${durationMin} دقيقة)</td>\n      </tr>\n      <tr>\n        <td style=\"padding: 10px; border: 1px solid #ddd; font-weight: bold;\">حالة مصدر الطاقة (الكهرباء):</td>\n        <td style=\"padding: 10px; border: 1px solid #ddd;\">التيار الكهربائي والأجهزة تعمل بشكل مستمر دون انقطاع</td>\n      </tr>\n    </table>\n\n    <div style=\"background-color: #fff8e1; border-right: 4px solid #ffa000; padding: 12px; margin: 15px 0; font-size: 14px;\">\n      <b>المطالبة بالتعويض:</b><br/>\n      بناءً على القواعد وحقوق المستخدمين المقررة من <b>الجهاز القومي لتنظيم الاتصالات (NTRA)</b>، وبما أن العطل غير ناتج عن انقطاع كهرباء لدي، أرجو من سيادتكم احتساب فترة التوقف وإضافة <b>التعويض المستحق (جيجابايتس إضافية أو خصم قيمة الانقطاع من الفاتورة)</b> لحساب المشترك مع موافاتي برقم الشكوى.\n    </div>\n\n    <p style=\"font-size: 14px; margin-top: 20px;\">\n      شاكرين حسن تعاونكم وسرعة استجابتكم.<br/>\n      <b>مقدمه لسيادتكم:</b> ${holder}<br/>\n      <b>رقم الاشتراك:</b> ${landline}\n    </p>\n  </div>\n  `;\n\n  return { subject, html };\n}\n\n// WAN1 (Vodafone)\nif (item.wan1_suspected_down && !item.wan1_currently_down) {\n  alerts.push({\n    router_id: routerId,\n    interface: 'wan1',\n    provider_name: 'Vodafone DSL',\n    landline_number: item.wan1_landline || '055XXXXXXX',\n    account_holder: item.wan1_holder || 'اسم المشترك',\n    support_email: item.wan1_email || 'vodafone.online@vodafone.com',\n    event: 'DOWN',\n    is_down: true,\n    started_at: nowIso,\n    ended_at: null,\n    duration_minutes: null,\n    should_send_email: false,\n    message: `🚨 <b>تحذير: توقف خدمة الإنترنت على WAN1 (فودافون)</b>\\n\\nالراوتر: <code>${routerId}</code>\\nالخط الأرضي: <code>${item.wan1_landline}</code>\\n⏱️ وقت بدء الانقطاع: <code>${formatCairo(nowIso)}</code>\\nℹ️ تم التأكد أن الراوتر والكهرباء تعملان طبيعياً (انقطاع من مزود الخدمة).`\n  });\n} else if (!item.wan1_suspected_down && item.wan1_currently_down) {\n  const startedAt = item.wan1_outage_started_at ? new Date(item.wan1_outage_started_at) : new Date(Date.now() - 15 * 60000);\n  const endedAt = new Date();\n  const durationMin = Math.max(1, Math.round((endedAt.getTime() - startedAt.getTime()) / 60000));\n  \n  const emailData = buildCompensationEmail('شركة فودافون مصر (Vodafone DSL)', item.wan1_landline, item.wan1_holder, startedAt, endedAt, durationMin);\n\n  alerts.push({\n    router_id: routerId,\n    interface: 'wan1',\n    provider_name: 'Vodafone DSL',\n    landline_number: item.wan1_landline || '055XXXXXXX',\n    account_holder: item.wan1_holder || 'اسم المشترك',\n    support_email: item.wan1_email || 'vodafone.online@vodafone.com',\n    event: 'RECOVERED',\n    is_down: false,\n    started_at: startedAt.toISOString(),\n    ended_at: endedAt.toISOString(),\n    duration_minutes: durationMin,\n    should_send_email: true,\n    email_subject: emailData.subject,\n    email_html: emailData.html,\n    message: `✅ <b>استعادة اتصال WAN1 (فودافون) - تم إرسال طلب التعويض</b>\\n\\nالراوتر: <code>${routerId}</code>\\nالخط الأرضي: <code>${item.wan1_landline}</code>\\n⏱️ مدة الانقطاع الفعلي: <b>${durationMin} دقيقة</b>\\n📩 <i>تم إرسال إيميل رسمي تلقائياً لخدمة عملاء فودافون للمطالبة بالتعويض عن فترة التوقف طبقاً للائحة NTRA.</i>`\n  });\n}\n\n// WAN2 (WE Egypt)\nif (item.wan2_suspected_down && !item.wan2_currently_down) {\n  alerts.push({\n    router_id: routerId,\n    interface: 'wan2',\n    provider_name: 'WE Egypt (DSL/Fiber)',\n    landline_number: item.wan2_landline || '055YYYYYYY',\n    account_holder: item.wan2_holder || 'اسم المشترك',\n    support_email: item.wan2_email || 'CustomerCare@te.eg',\n    event: 'DOWN',\n    is_down: true,\n    started_at: nowIso,\n    ended_at: null,\n    duration_minutes: null,\n    should_send_email: false,\n    message: `🚨 <b>تحذير: توقف خدمة الإنترنت على WAN2 (شركة وي - WE)</b>\\n\\nالراوتر: <code>${routerId}</code>\\nالخط الأرضي: <code>${item.wan2_landline}</code>\\n⏱️ وقت بدء الانقطاع: <code>${formatCairo(nowIso)}</code>\\nℹ️ تم التأكد أن الراوتر والكهرباء تعملان طبيعياً (انقطاع من مزود الخدمة).`\n  });\n} else if (!item.wan2_suspected_down && item.wan2_currently_down) {\n  const startedAt = item.wan2_outage_started_at ? new Date(item.wan2_outage_started_at) : new Date(Date.now() - 15 * 60000);\n  const endedAt = new Date();\n  const durationMin = Math.max(1, Math.round((endedAt.getTime() - startedAt.getTime()) / 60000));\n  \n  const emailData = buildCompensationEmail('الشركة المصرية للاتصالات (WE)', item.wan2_landline, item.wan2_holder, startedAt, endedAt, durationMin);\n\n  alerts.push({\n    router_id: routerId,\n    interface: 'wan2',\n    provider_name: 'WE Egypt (DSL/Fiber)',\n    landline_number: item.wan2_landline || '055YYYYYYY',\n    account_holder: item.wan2_holder || 'اسم المشترك',\n    support_email: item.wan2_email || 'CustomerCare@te.eg',\n    event: 'RECOVERED',\n    is_down: false,\n    started_at: startedAt.toISOString(),\n    ended_at: endedAt.toISOString(),\n    duration_minutes: durationMin,\n    should_send_email: true,\n    email_subject: emailData.subject,\n    email_html: emailData.html,\n    message: `✅ <b>استعادة اتصال WAN2 (شركة وي) - تم إرسال طلب التعويض</b>\\n\\nالراوتر: <code>${routerId}</code>\\nالخط الأرضي: <code>${item.wan2_landline}</code>\\n⏱️ مدة الانقطاع الفعلي: <b>${durationMin} دقيقة</b>\\n📩 <i>تم إرسال إيميل رسمي تلقائياً لخدمة عملاء WE للمطالبة بالتعويض عن فترة التوقف طبقاً للائحة NTRA.</i>`\n  });\n}\n\nreturn alerts.map(a => ({ json: a }));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2704,
+        512
+      ],
+      "id": "73ef2552-a1e9-46ab-8d73-a649562c8af1",
+      "name": "Process WAN Alerts"
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $env.TELEGRAM_ADMIN_CHAT_ID || '123456789' }}",
+        "text": "={{ $json.message }}",
+        "additionalFields": {
+          "parse_mode": "HTML"
+        }
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        2928,
+        608
+      ],
+      "id": "2feba23e-56fb-45f3-afb6-f04edc3eebfb",
+      "name": "Send WAN Alert Telegram",
+      "webhookId": "5afcf5df-e47d-4d42-850a-24feba4c4586",
+      "credentials": {
+        "telegramApi": {
+          "id": "ZGNboDpUiilvCAy8",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO wan_incident_state (\n    router_id,\n    interface_name,\n    is_down,\n    outage_started_at,\n    last_alert_sent_at,\n    updated_at\n)\nVALUES (\n    $1,\n    $2,\n    (CASE WHEN $3 = 'DOWN' THEN TRUE ELSE FALSE END),\n    (CASE WHEN $3 = 'DOWN' THEN NOW() ELSE NULL END),\n    NOW(),\n    NOW()\n)\nON CONFLICT (router_id, interface_name)\nDO UPDATE SET\n    is_down = EXCLUDED.is_down,\n    outage_started_at = (CASE WHEN EXCLUDED.is_down THEN COALESCE(wan_incident_state.outage_started_at, NOW()) ELSE NULL END),\n    last_alert_sent_at = NOW(),\n    updated_at = NOW();",
+        "options": {
+          "queryReplacement": "={{ [\n  $json.router_id,\n  $json.interface,\n  $json.event\n] }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        2928,
+        416
+      ],
+      "id": "4f1e225a-8e46-465b-944f-fbae9e5f9ab6",
+      "name": "Update Incident State",
+      "credentials": {
+        "postgres": {
+          "id": "XKwdrIadj1gSLirP",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "mikrotik/wan-usage",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        912,
+        416
+      ],
+      "id": "9339401a-6d43-4423-8571-3f7f70880061",
+      "name": "Webhook1",
+      "webhookId": "33948d78-5e9e-4b83-b129-1d0bb8b21a65"
+    },
+    {
+      "parameters": {
+        "jsCode": "const body = $json.body;\n\nif (!body) {\n  throw new Error('Missing request body');\n}\n\nconst required = ['router_id', 'wan1', 'wan2'];\n\nfor (const field of required) {\n  if (body[field] === undefined) {\n    throw new Error(`Missing field: ${field}`);\n  }\n}\n\nfor (const wan of ['wan1', 'wan2']) {\n  if (\n    typeof body[wan].rx !== 'number' ||\n    typeof body[wan].tx !== 'number'\n  ) {\n    throw new Error(`Invalid ${wan} counters`);\n  }\n}\n\nreturn [\n  {\n    json: {\n      router_id: body.router_id,\n      uptime: body.uptime ?? null,\n      wan1_rx: body.wan1.rx,\n      wan1_tx: body.wan1.tx,\n      wan2_rx: body.wan2.rx,\n      wan2_tx: body.wan2.tx,\n      received_at: new Date().toISOString()\n    }\n  }\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1136,
+        416
+      ],
+      "id": "3e07ce27-4967-4291-9a91-3c106a7b7d8e",
+      "name": "Normalize Telemetry1"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT\n    id,\n    router_id,\n    uptime,\n    wan1_rx,\n    wan1_tx,\n    wan2_rx,\n    wan2_tx,\n    received_at\nFROM mikrotik_wan_readings\nWHERE router_id = $1\nORDER BY received_at DESC\nLIMIT 1;",
+        "options": {
+          "queryReplacement": "={{$json.router_id}}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        1360,
+        416
+      ],
+      "id": "d86de29a-ad92-4b57-ba07-26a41d1e17d7",
+      "name": "Get Previous Reading1",
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "XKwdrIadj1gSLirP",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const current = $('Normalize Telemetry1').first().json;\nconst prevItem = $input.first()?.json;\n\nconst hasPrevious = Boolean(prevItem && (prevItem.id !== undefined && prevItem.id !== null));\n\nfunction toBigIntSafe(val) {\n  if (val === undefined || val === null || val === '') return 0n;\n  try {\n    return BigInt(val);\n  } catch (e) {\n    return 0n;\n  }\n}\n\nfunction computeDelta(currVal, prevVal) {\n  if (!hasPrevious) {\n    return { delta: 0n, reset: false };\n  }\n\n  const c = toBigIntSafe(currVal);\n  const p = toBigIntSafe(prevVal);\n\n  if (c < p) {\n    return { delta: 0n, reset: true };\n  }\n\n  return { delta: c - p, reset: false };\n}\n\nconst dWan1Rx = computeDelta(current.wan1_rx, prevItem?.wan1_rx);\nconst dWan1Tx = computeDelta(current.wan1_tx, prevItem?.wan1_tx);\nconst dWan2Rx = computeDelta(current.wan2_rx, prevItem?.wan2_rx);\nconst dWan2Tx = computeDelta(current.wan2_tx, prevItem?.wan2_tx);\n\nconst isReset = dWan1Rx.reset || dWan1Tx.reset || dWan2Rx.reset || dWan2Tx.reset;\n\nlet wan1Rx = dWan1Rx.delta;\nlet wan1Tx = dWan1Tx.delta;\nlet wan2Rx = dWan2Rx.delta;\nlet wan2Tx = dWan2Tx.delta;\n\nif (isReset) {\n  wan1Rx = 0n;\n  wan1Tx = 0n;\n  wan2Rx = 0n;\n  wan2Tx = 0n;\n}\n\nconst wan1Total = wan1Rx + wan1Tx;\nconst wan2Total = wan2Rx + wan2Tx;\nconst total = wan1Total + wan2Total;\n\nreturn [{\n  json: {\n    router_id: current.router_id,\n    uptime: current.uptime,\n    wan1_rx: current.wan1_rx,\n    wan1_tx: current.wan1_tx,\n    wan2_rx: current.wan2_rx,\n    wan2_tx: current.wan2_tx,\n    received_at: current.received_at,\n    previous_reading_id: hasPrevious ? prevItem.id : null,\n    counter_reset: isReset,\n    wan1_rx_bytes: Number(wan1Rx),\n    wan1_tx_bytes: Number(wan1Tx),\n    wan2_rx_bytes: Number(wan2Rx),\n    wan2_tx_bytes: Number(wan2Tx),\n    wan1_total_bytes: Number(wan1Total),\n    wan2_total_bytes: Number(wan2Total),\n    total_bytes: Number(total),\n    usage_at: current.received_at\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1584,
+        416
+      ],
+      "id": "7bdf9edb-9b19-4298-94ed-b59b29f0c8cf",
+      "name": "Calculate WAN Delta"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO mikrotik_wan_readings (\n    router_id,\n    uptime,\n    wan1_rx,\n    wan1_tx,\n    wan2_rx,\n    wan2_tx,\n    received_at\n)\nVALUES (\n    $1, $2, $3, $4, $5, $6, $7\n)\nRETURNING id;",
+        "options": {
+          "queryReplacement": "={{ [\n  $json.router_id,\n  $json.uptime,\n  $json.wan1_rx,\n  $json.wan1_tx,\n  $json.wan2_rx,\n  $json.wan2_tx,\n  $json.received_at\n] }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        2032,
+        512
+      ],
+      "id": "b3c9797c-eea8-4c93-b086-c7e0b26d86e4",
+      "name": "Store Raw Reading",
+      "credentials": {
+        "postgres": {
+          "id": "XKwdrIadj1gSLirP",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO mikrotik_wan_usage (\n    router_id,\n    reading_id,\n    wan1_rx_bytes,\n    wan1_tx_bytes,\n    wan2_rx_bytes,\n    wan2_tx_bytes,\n    total_bytes,\n    counter_reset,\n    usage_at\n)\nVALUES (\n    $1, $2, $3, $4, $5, $6, $7, $8, $9\n);",
+        "options": {
+          "queryReplacement": "={{ [\n  $('Calculate WAN Delta').first().json.router_id,\n  $json.id,\n  $('Calculate WAN Delta').first().json.wan1_rx_bytes,\n  $('Calculate WAN Delta').first().json.wan1_tx_bytes,\n  $('Calculate WAN Delta').first().json.wan2_rx_bytes,\n  $('Calculate WAN Delta').first().json.wan2_tx_bytes,\n  $('Calculate WAN Delta').first().json.total_bytes,\n  $('Calculate WAN Delta').first().json.counter_reset,\n  $('Calculate WAN Delta').first().json.usage_at\n] }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        2256,
+        512
+      ],
+      "id": "90fdd350-a0b7-4b69-b8c7-98d650ff5f23",
+      "name": "Store Usage Delta",
+      "credentials": {
+        "postgres": {
+          "id": "XKwdrIadj1gSLirP",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH recent_stats AS (\n    SELECT \n        (wan1_rx_bytes + wan1_tx_bytes) AS wan1_bytes,\n        (wan2_rx_bytes + wan2_tx_bytes) AS wan2_bytes\n    FROM mikrotik_wan_usage\n    WHERE router_id = $1\n    ORDER BY usage_at DESC\n    LIMIT 3\n),\naggregates AS (\n    SELECT \n        SUM(wan1_bytes) AS sum_wan1,\n        SUM(wan2_bytes) AS sum_wan2,\n        COUNT(*) AS total_samples\n    FROM recent_stats\n)\nSELECT \n    a.sum_wan1,\n    a.sum_wan2,\n    CASE \n        WHEN a.total_samples >= 3 AND a.sum_wan1 = 0 AND a.sum_wan2 > 100000 THEN TRUE \n        ELSE FALSE \n    END AS wan1_suspected_down,\n    CASE \n        WHEN a.total_samples >= 3 AND a.sum_wan2 = 0 AND a.sum_wan1 > 100000 THEN TRUE \n        ELSE FALSE \n    END AS wan2_suspected_down,\n    s1.is_down AS wan1_currently_down,\n    s1.outage_started_at AS wan1_outage_started_at,\n    s2.is_down AS wan2_currently_down,\n    s2.outage_started_at AS wan2_outage_started_at,\n    q1.landline_number AS wan1_landline,\n    q1.account_holder AS wan1_holder,\n    q1.support_email AS wan1_email,\n    q2.landline_number AS wan2_landline,\n    q2.account_holder AS wan2_holder,\n    q2.support_email AS wan2_email\nFROM aggregates a\nCROSS JOIN (SELECT is_down, outage_started_at FROM wan_incident_state WHERE router_id = $1 AND interface_name = 'wan1') s1\nCROSS JOIN (SELECT is_down, outage_started_at FROM wan_incident_state WHERE router_id = $1 AND interface_name = 'wan2') s2\nCROSS JOIN (SELECT landline_number, account_holder, support_email FROM mikrotik_wan_quotas WHERE router_id = $1 AND interface_name = 'wan1') q1\nCROSS JOIN (SELECT landline_number, account_holder, support_email FROM mikrotik_wan_quotas WHERE router_id = $1 AND interface_name = 'wan2') q2;",
+        "options": {
+          "queryReplacement": "={{ $('Calculate WAN Delta').first().json.router_id }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        2480,
+        512
+      ],
+      "id": "ff9fcd3c-095b-4ea9-aec1-9552aa2581f9",
+      "name": "Check WAN Inactivity1",
+      "credentials": {
+        "postgres": {
+          "id": "XKwdrIadj1gSLirP",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $('Calculate WAN Delta').first().json.counter_reset }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        2256,
+        320
+      ],
+      "id": "dd136c75-13b1-421c-a678-68f6bff1cf3d",
+      "name": "Is Reboot / Reset?"
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $env.TELEGRAM_ADMIN_CHAT_ID || '123456789' }}",
+        "text": "={{ \n`🔄 <b>تنبيه: إعادة تشغيل الراوتر (Router Reboot Detected)</b>\\n\\n` +\n`🖥️ الجهاز: <code>${$('Calculate WAN Delta').first().json.router_id}</code>\\n` +\n`⏱️ وقت التشغيل الحالي: <code>${$('Calculate WAN Delta').first().json.uptime}</code>\\n` +\n`📅 التوقيت: <code>${new Date($('Calculate WAN Delta').first().json.received_at).toLocaleString('en-GB', { timeZone: 'Africa/Cairo' })}</code>\\n\\n` +\n`ℹ️ <i>تم تصفير العدادات وإعادة تعيين القراءة المرجعية (Baseline) بنجاح لتجنب الحسابات السالبة.</i>`\n}}",
+        "additionalFields": {
+          "parse_mode": "HTML"
+        }
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        2480,
+        320
+      ],
+      "id": "7ba10ab6-b625-4ddb-bdc4-e24475cf9828",
+      "name": "Send Reboot Alert",
+      "webhookId": "392ef32e-9c6c-4128-8266-bc317cd3abc5",
+      "credentials": {
+        "telegramApi": {
+          "id": "ZGNboDpUiilvCAy8",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH current_status AS (\n    SELECT \n        q.router_id,\n        q.interface_name,\n        q.provider_name,\n        q.quota_gb,\n        q.used_gb,\n        q.remaining_gb,\n        q.used_percentage,\n        q.days_left,\n        q.renewal_date,\n        q.cycle_start,\n        COALESCE(s.alerted_80, FALSE) AS alerted_80,\n        COALESCE(s.alerted_95, FALSE) AS alerted_95,\n        COALESCE(s.alerted_100, FALSE) AS alerted_100\n    FROM view_mikrotik_wan_quota_status q\n    LEFT JOIN quota_alert_state s \n        ON q.router_id = s.router_id \n       AND q.interface_name = s.interface_name \n       AND q.cycle_start = s.cycle_start\n)\nSELECT \n    router_id,\n    interface_name,\n    provider_name,\n    quota_gb,\n    used_gb,\n    remaining_gb,\n    used_percentage,\n    days_left,\n    renewal_date,\n    cycle_start,\n    CASE \n        WHEN used_percentage >= 99.0 AND NOT alerted_100 THEN '100'\n        WHEN used_percentage >= 95.0 AND NOT alerted_95 THEN '95'\n        WHEN used_percentage >= 80.0 AND NOT alerted_80 THEN '80'\n        ELSE NULL \n    END AS triggered_tier\nFROM current_status\nWHERE \n    (used_percentage >= 99.0 AND NOT alerted_100)\n    OR\n    (used_percentage >= 95.0 AND NOT alerted_95 AND used_percentage < 99.0)\n    OR \n    (used_percentage >= 80.0 AND NOT alerted_80 AND used_percentage < 95.0);",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        1136,
+        96
+      ],
+      "id": "dd295955-5602-4986-a3ad-758f6c7db6ae",
+      "name": "Check Quota Thresholds",
+      "credentials": {
+        "postgres": {
+          "id": "XKwdrIadj1gSLirP",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Map over all incoming rows (WAN1, WAN2, or both)\nreturn $input.all().map(entry => {\n  const item = entry.json;\n  const is100 = item.triggered_tier === '100';\n  const is95 = item.triggered_tier === '95';\n  \n  let header = '⚠️ <b>تحذير: استهلاك 80% من باقة الإنترنت</b>';\n  let advice = 'ℹ️ <i>متبقي أكثر من نصف الشهر تقريباً، يرجى الانتباه لمعدل الاستهلاك اليومي.</i>';\n  \n  if (is100) {\n    header = '🛑 <b>إنذار حاسم: نفاد باقة الإنترنت بالكامل (100%)!</b>';\n    advice = '🛡️ <b>تم تفعيل العزل التلقائي لمنفذ ' + item.interface_name.toUpperCase() + ' لمنع خنق السرعة وسحب التصفح. كل الترافيك موجه الآن للخط الاحتياطي.</b>';\n  } else if (is95) {\n    header = '🚨 <b>إنذار حرج: استهلاك 95% من باقة الإنترنت!</b>';\n    advice = '⚠️ <i>يُنصح بجدولة التجديد المبكر أو ترشيد الاستهلاك لتفادي هبوط السرعة الحرج.</i>';\n  }\n\n  const text = header + '\\n\\n' +\n    '🌐 المزود: <b>' + item.provider_name + '</b> (<code>' + item.interface_name.toUpperCase() + '</code>)\\n' +\n    '🖥️ الراوتر: <code>' + item.router_id + '</code>\\n' +\n    '📊 النسبة المستهلكة: <b>' + item.used_percentage + '%</b>\\n' +\n    '📉 المتبقي الفعلي: <b>' + item.remaining_gb + ' GB</b> من أصل ' + item.quota_gb + ' GB\\n' +\n    '⏳ الأيام المتبقية: <b>' + item.days_left + ' يوم</b> (التجديد: ' + item.renewal_date + ')\\n\\n' +\n    advice;\n\n  return {\n    json: {\n      ...item,\n      alert_message: text\n    }\n  };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1360,
+        96
+      ],
+      "id": "2b7936aa-d1dc-44b9-b7a2-cf6e7d7b5634",
+      "name": "Format Threshold Alert"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO quota_alert_state (\n    router_id, \n    interface_name, \n    cycle_start, \n    alerted_80, \n    alerted_95, \n    alerted_100,\n    last_alert_at\n)\nVALUES (\n    $1, \n    $2, \n    $3::date, \n    ($4 = '80' OR $4 = '95' OR $4 = '100'), \n    ($4 = '95' OR $4 = '100'), \n    ($4 = '100'),\n    NOW()\n)\nON CONFLICT (router_id, interface_name, cycle_start)\nDO UPDATE SET \n    alerted_80 = (CASE WHEN $4 IN ('80', '95', '100') THEN TRUE ELSE quota_alert_state.alerted_80 END),\n    alerted_95 = (CASE WHEN $4 IN ('95', '100') THEN TRUE ELSE quota_alert_state.alerted_95 END),\n    alerted_100 = (CASE WHEN $4 = '100' THEN TRUE ELSE quota_alert_state.alerted_100 END),\n    last_alert_at = NOW()\nRETURNING *;",
+        "options": {
+          "queryReplacement": "={{ [\n  $json.router_id,\n  $json.interface_name,\n  $json.cycle_start,\n  $json.triggered_tier\n] }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        1584,
+        96
+      ],
+      "id": "6f680bc6-96b5-4307-9924-6b4d89580ca0",
+      "name": "Update Quota State",
+      "credentials": {
+        "postgres": {
+          "id": "XKwdrIadj1gSLirP",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $env.TELEGRAM_ADMIN_CHAT_ID || '123456789' }}",
+        "text": "={{ $('Format Threshold Alert').item.json.alert_message }}",
+        "additionalFields": {
+          "parse_mode": "HTML"
+        }
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1808,
+        96
+      ],
+      "id": "2172cd29-3c95-4a99-8957-fe4a989b1209",
+      "name": "Send Quota Alert Telegram",
+      "webhookId": "a501c445-0b1d-4f63-bf83-8c4c8cb5446b",
+      "credentials": {
+        "telegramApi": {
+          "id": "ZGNboDpUiilvCAy8",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        912,
+        96
+      ],
+      "id": "35abf7c2-c2a4-465a-9084-4321048cd4cf",
+      "name": "Schedule Trigger"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.should_send_email }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        3160,
+        512
+      ],
+      "id": "if-should-email-compensation",
+      "name": "Should Dispatch Compensation Email?"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://n8n-text-overlay:8000/send-email",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  to_email: $json.support_email,\n  cc_email: 'admin@example.com',\n  subject: $json.email_subject,\n  html_content: $json.email_html\n}) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3380,
+        416
+      ],
+      "id": "http-dispatch-compensation-email",
+      "name": "Dispatch Compensation Email"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO wan_outage_events (\n    router_id,\n    interface_name,\n    provider_name,\n    landline_number,\n    account_holder,\n    started_at,\n    ended_at,\n    duration_minutes,\n    outage_cause,\n    email_sent,\n    email_sent_at,\n    email_recipient,\n    email_subject,\n    email_body\n)\nVALUES (\n    $1, $2, $3, $4, $5, $6, $7, $8, 'ISP_FAILURE', TRUE, NOW(), $9, $10, $11\n);",
+        "options": {
+          "queryReplacement": "={{ [\n  $('Process WAN Alerts').item.json.router_id,\n  $('Process WAN Alerts').item.json.interface,\n  $('Process WAN Alerts').item.json.provider_name,\n  $('Process WAN Alerts').item.json.landline_number,\n  $('Process WAN Alerts').item.json.account_holder,\n  $('Process WAN Alerts').item.json.started_at,\n  $('Process WAN Alerts').item.json.ended_at,\n  $('Process WAN Alerts').item.json.duration_minutes,\n  $('Process WAN Alerts').item.json.support_email,\n  $('Process WAN Alerts').item.json.email_subject,\n  $('Process WAN Alerts').item.json.email_html\n] }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        3600,
+        416
+      ],
+      "id": "pg-log-outage-event",
+      "name": "Log Outage Event in DB",
+      "credentials": {
+        "postgres": {
+          "id": "XKwdrIadj1gSLirP",
+          "name": "Postgres account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Daily at 11:55 PM": {
+      "main": [
+        [
+          {
+            "node": "Get Today Usage",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Today Usage": {
+      "main": [
+        [
+          {
+            "node": "Format Telegram Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Telegram Message": {
+      "main": [
+        [
+          {
+            "node": "Send Telegram Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Process WAN Alerts": {
+      "main": [
+        [
+          {
+            "node": "Send WAN Alert Telegram",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Update Incident State",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Should Dispatch Compensation Email?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send WAN Alert Telegram": {
+      "main": [
+        []
+      ]
+    },
+    "Webhook1": {
+      "main": [
+        [
+          {
+            "node": "Normalize Telemetry1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Telemetry1": {
+      "main": [
+        [
+          {
+            "node": "Get Previous Reading1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Previous Reading1": {
+      "main": [
+        [
+          {
+            "node": "Calculate WAN Delta",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Calculate WAN Delta": {
+      "main": [
+        [
+          {
+            "node": "Store Raw Reading",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Store Raw Reading": {
+      "main": [
+        [
+          {
+            "node": "Store Usage Delta",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Is Reboot / Reset?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Store Usage Delta": {
+      "main": [
+        [
+          {
+            "node": "Check WAN Inactivity1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check WAN Inactivity1": {
+      "main": [
+        [
+          {
+            "node": "Process WAN Alerts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Reboot / Reset?": {
+      "main": [
+        [
+          {
+            "node": "Send Reboot Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Quota Thresholds": {
+      "main": [
+        [
+          {
+            "node": "Format Threshold Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Threshold Alert": {
+      "main": [
+        [
+          {
+            "node": "Update Quota State",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Quota State": {
+      "main": [
+        [
+          {
+            "node": "Send Quota Alert Telegram",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Check Quota Thresholds",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Should Dispatch Compensation Email?": {
+      "main": [
+        [
+          {
+            "node": "Dispatch Compensation Email",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Dispatch Compensation Email": {
+      "main": [
+        [
+          {
+            "node": "Log Outage Event in DB",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "versionId": "82cf28cb-f3a3-4a83-b2d2-025430f4e9f4",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "d50e4baeb74bedfd8578e5fbd3bed82fbfb68308421fae28096e10b4e99fcf87"
+  },
+  "nodeGroups": [],
+  "id": "LgEUar2y0Jc5Bpz5",
+  "tags": []
+}

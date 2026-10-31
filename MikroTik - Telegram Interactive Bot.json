@@ -1,0 +1,333 @@
+{
+  "name": "MikroTik - Telegram Interactive Bot",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "mikrotik/telegram-bot",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        200,
+        300
+      ],
+      "id": "wh-telegram-bot-trigger",
+      "name": "Webhook"
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $input.first()?.json?.body || $input.first()?.json || {};\nconst allowedAdmin = $env.TELEGRAM_ADMIN_CHAT_ID || '123456789';\n\n// Handle Callback Query (Button Clicks)\nif (raw.callback_query) {\n  const cq = raw.callback_query;\n  const fromId = String(cq.from?.id);\n  const data = cq.data || '';\n  \n  return [{\n    json: {\n      type: 'callback',\n      is_authorized: fromId === String(allowedAdmin),\n      chat_id: cq.message?.chat?.id || allowedAdmin,\n      from_id: fromId,\n      callback_query_id: cq.id,\n      data: data,\n      user_name: cq.from?.username || cq.from?.first_name || 'Admin'\n    }\n  }];\n}\n\n// Handle Direct Messages / Slash Commands\nif (raw.message) {\n  const msg = raw.message;\n  const fromId = String(msg.from?.id);\n  const text = (msg.text || '').trim();\n  \n  return [{\n    json: {\n      type: 'message',\n      is_authorized: fromId === String(allowedAdmin),\n      chat_id: msg.chat?.id || allowedAdmin,\n      from_id: fromId,\n      text: text,\n      user_name: msg.from?.username || msg.from?.first_name || 'Admin'\n    }\n  }];\n}\n\nreturn [];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        420,
+        300
+      ],
+      "id": "e1a90c01-7b14-453a-aae4-222222222222",
+      "name": "Auth & Dispatcher"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.is_authorized }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        640,
+        300
+      ],
+      "id": "e1a90c01-7b14-453a-aae4-333333333333",
+      "name": "Is Authorized Admin?"
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $json.chat_id }}",
+        "text": "⛔ <b>عفواً، ليس لديك صلاحية للتحكم في هذا النظام.</b>\nهذا البوت مخصص للإدارة المركزية فقط.",
+        "additionalFields": {
+          "parse_mode": "HTML"
+        }
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        860,
+        480
+      ],
+      "id": "e1a90c01-7b14-453a-aae4-444444444444",
+      "name": "Unauthorized Reply",
+      "credentials": {
+        "telegramApi": {
+          "id": "ZGNboDpUiilvCAy8",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT \n    router_id,\n    interface_name,\n    provider_name,\n    quota_gb,\n    base_quota_gb,\n    addon_quota_gb,\n    used_gb,\n    remaining_gb,\n    used_percentage,\n    days_left,\n    renewal_date,\n    cycle_start,\n    daily_burn_rate_gb,\n    projected_exhaustion_date,\n    days_until_exhaustion,\n    will_exhaust_before_renewal,\n    operational_state,\n    operational_state_reason\nFROM view_mikrotik_wan_quota_status\nWHERE router_id = 'home-router-01'\nORDER BY interface_name ASC;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        860,
+        200
+      ],
+      "id": "e1a90c01-7b14-453a-aae4-555555555555",
+      "name": "Fetch Live Quotas",
+      "credentials": {
+        "postgres": {
+          "id": "XKwdrIadj1gSLirP",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const incoming = $('Auth & Dispatcher').first().json;\nconst rows = $input.all().map(i => i.json);\n\nfunction progressBar(usedPct) {\n  const totalBars = 10;\n  const filledBars = Math.min(totalBars, Math.max(0, Math.round((Number(usedPct) || 0) / 10)));\n  const emptyBars = totalBars - filledBars;\n  return '▓'.repeat(filledBars) + '░'.repeat(emptyBars);\n}\n\nlet msg = '🎛️ <b>لوحة التحكم اللحظية - راوتر المنزل</b>\\n';\nmsg += '⏱️ التوقيت: <code>' + new Date().toLocaleString('en-GB', { timeZone: 'Africa/Cairo' }) + '</code>\\n';\nmsg += '━━━━━━━━━━━━━━━━━━━━━\\n\\n';\n\nfor (const q of rows) {\n  const opBadge = q.operational_state === 'NORMAL' ? '🟢 متصل وطبيعي' : (q.operational_state === 'ISOLATED' ? '🔴 معزول (ISOLATED)' : '🟡 مقيد (THROTTLED)');\n  msg += '🌐 <b>' + q.interface_name.toUpperCase() + ' (' + q.provider_name + '):</b>\\n';\n  msg += '  • الحالة: <b>' + opBadge + '</b>\\n';\n  msg += '  • الرصيد: [' + progressBar(q.used_percentage) + '] <b>' + q.used_percentage + '%</b>\\n';\n  msg += '  • المستهلك: <b>' + q.used_gb + ' GB</b> | المتبقي: <b>' + q.remaining_gb + ' GB</b> من ' + q.quota_gb + ' GB\\n';\n  msg += '  • التجديد: بعد <b>' + q.days_left + ' يوم</b> (' + q.renewal_date + ')\\n';\n  if (q.daily_burn_rate_gb && Number(q.daily_burn_rate_gb) > 0) {\n    msg += '  • معدل الحرق: <b>' + q.daily_burn_rate_gb + ' GB/يوم</b>\\n';\n    if (q.will_exhaust_before_renewal) {\n      msg += '  • ⚠️ <b>نفاد متوقع: ' + q.projected_exhaustion_date + '</b> (قبل التجديد!)\\n';\n    } else {\n      msg += '  • 🎯 نفاد متوقع: ' + q.projected_exhaustion_date + ' (آمن)\\n';\n    }\n  }\n  msg += '\\n';\n}\n\nmsg += '━━━━━━━━━━━━━━━━━━━━━\\n';\nmsg += '👇 <i>اختر إجراءً من القائمة أدناه:</i>';\n\n// Build Interactive Inline Keyboard\nconst keyboard = {\n  inline_keyboard: [\n    [\n      { text: '🔄 تحديث الحالة الآن', callback_data: 'cmd_refresh' },\n      { text: '📊 ملخص اليوم', callback_data: 'cmd_today_summary' }\n    ],\n    [\n      { text: '🔴 عزل خط WE (WAN2)', callback_data: 'cmd_isolate_wan2' },\n      { text: '🟢 استعادة خط WE (WAN2)', callback_data: 'cmd_restore_wan2' }\n    ],\n    [\n      { text: '🔴 عزل فودافون (WAN1)', callback_data: 'cmd_isolate_wan1' },\n      { text: '🟢 استعادة فودافون (WAN1)', callback_data: 'cmd_restore_wan1' }\n    ]\n  ]\n};\n\nreturn [{\n  json: {\n    chat_id: incoming.chat_id,\n    message: msg,\n    reply_markup: keyboard,\n    action: incoming.data || incoming.text\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1080,
+        200
+      ],
+      "id": "e1a90c01-7b14-453a-aae4-666666666666",
+      "name": "Build Menu & Status"
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $json.chat_id }}",
+        "text": "={{ $json.message }}",
+        "replyMarkup": "inlineKeyboard",
+        "additionalFields": {
+          "parse_mode": "HTML"
+        }
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1300,
+        200
+      ],
+      "id": "e1a90c01-7b14-453a-aae4-777777777777",
+      "name": "Send Interactive Menu",
+      "credentials": {
+        "telegramApi": {
+          "id": "ZGNboDpUiilvCAy8",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $('Auth & Dispatcher').first().json.data || '' }}",
+              "operation": "startsWith",
+              "value2": "cmd_isolate_"
+            },
+            {
+              "value1": "={{ $('Auth & Dispatcher').first().json.data || '' }}",
+              "operation": "startsWith",
+              "value2": "cmd_restore_"
+            }
+          ]
+        },
+        "combineOperation": "any"
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        1080,
+        380
+      ],
+      "id": "e1a90c01-7b14-453a-aae4-888888888888",
+      "name": "Is Control Command?"
+    },
+    {
+      "parameters": {
+        "jsCode": "const cmd = $('Auth & Dispatcher').first().json.data;\nconst adminName = $('Auth & Dispatcher').first().json.user_name || 'Admin';\n\nlet iface = 'wan2';\nlet action = 'ISOLATE';\n\nif (cmd === 'cmd_isolate_wan2') {\n  iface = 'wan2';\n  action = 'ISOLATE';\n} else if (cmd === 'cmd_restore_wan2') {\n  iface = 'wan2';\n  action = 'RESTORE';\n} else if (cmd === 'cmd_isolate_wan1') {\n  iface = 'wan1';\n  action = 'ISOLATE';\n} else if (cmd === 'cmd_restore_wan1') {\n  iface = 'wan1';\n  action = 'RESTORE';\n}\n\n// Generate deterministic idempotency key with 60-second window\nconst timeWindow = Math.floor(Date.now() / 60000);\nconst idempotencyKey = `tg-${action.toLowerCase()}-${iface}-${timeWindow}`;\n\nreturn [{\n  json: {\n    idempotency_key: idempotencyKey,\n    router_id: 'home-router-01',\n    interface_name: iface,\n    action_type: action,\n    requested_by: `telegram:@${adminName}`,\n    reason: `Manual Telegram command: ${cmd}`,\n    chat_id: $('Auth & Dispatcher').first().json.chat_id\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1300,
+        380
+      ],
+      "id": "e1a90c01-7b14-453a-aae4-999999999999",
+      "name": "Prepare Control Action"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT transition_wan_state(\n    $1,\n    $2,\n    $3,\n    $4,\n    $5,\n    $6\n) AS result;",
+        "options": {
+          "queryReplacement": "={{ [\n  $json.idempotency_key,\n  $json.router_id,\n  $json.interface_name,\n  $json.action_type,\n  $json.requested_by,\n  $json.reason\n] }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        1520,
+        380
+      ],
+      "id": "e1a90c01-7b14-453a-aae4-aaaaaaaaaaaa",
+      "name": "Execute State Transition",
+      "credentials": {
+        "postgres": {
+          "id": "XKwdrIadj1gSLirP",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Prepare Control Action').first().json.chat_id }}",
+        "text": "={{ \n  const r = $json.result;\n  if (r.state_changed) {\n    return `✅ <b>تم تنفيذ الأمر بنجاح!</b>\\n\\n` +\n           `🌐 المنفذ: <code>${$('Prepare Control Action').first().json.interface_name.toUpperCase()}</code>\\n` +\n           `⚙️ الإجراء: <b>${$('Prepare Control Action').first().json.action_type}</b>\\n` +\n           `📊 الحالة الجديدة: <b>${r.current_state}</b> (كانت: ${r.previous_state})\\n` +\n           `🔑 مفتاح التتبع: <code>${r.idempotency_key}</code>`;\n  } else {\n    return `ℹ️ <b>تنبيه: لم يتغير المسار</b>\\n\\n` +\n           `🌐 المنفذ: <code>${$('Prepare Control Action').first().json.interface_name.toUpperCase()}</code>\\n` +\n           `الحالة الحالية بالفعل: <b>${r.current_state || 'بدون تغيير'}</b>\\n` +\n           `السبب: ${r.message}`;\n  }\n}}",
+        "additionalFields": {
+          "parse_mode": "HTML"
+        }
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1740,
+        380
+      ],
+      "id": "e1a90c01-7b14-453a-aae4-bbbbbbbbbbbb",
+      "name": "Notify Action Result",
+      "credentials": {
+        "telegramApi": {
+          "id": "ZGNboDpUiilvCAy8",
+          "name": "Telegram account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Auth & Dispatcher": {
+      "main": [
+        [
+          {
+            "node": "Is Authorized Admin?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Authorized Admin?": {
+      "main": [
+        [
+          {
+            "node": "Fetch Live Quotas",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Is Control Command?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Unauthorized Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Live Quotas": {
+      "main": [
+        [
+          {
+            "node": "Build Menu & Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Menu & Status": {
+      "main": [
+        [
+          {
+            "node": "Send Interactive Menu",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Control Command?": {
+      "main": [
+        [
+          {
+            "node": "Prepare Control Action",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Control Action": {
+      "main": [
+        [
+          {
+            "node": "Execute State Transition",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute State Transition": {
+      "main": [
+        [
+          {
+            "node": "Notify Action Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Auth & Dispatcher",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "e1a90c01-7b14-453a-aae4-000000000001",
+  "meta": {
+    "instanceId": "campaign-control-plane"
+  },
+  "id": "mikrotik-interactive-telegram-bot",
+  "tags": []
+}

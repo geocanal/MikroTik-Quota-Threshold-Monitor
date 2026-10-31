@@ -1,0 +1,157 @@
+{
+  "name": "MikroTik - Router Offline Monitor",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 5
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        900,
+        400
+      ],
+      "id": "sched-heartbeat-001",
+      "name": "Every 5 Minutes"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH latest_telemetry AS (\n    SELECT \n        router_id,\n        MAX(received_at) AS last_seen_at,\n        EXTRACT(EPOCH FROM (NOW() - MAX(received_at)))::int / 60 AS minutes_since_last_seen\n    FROM mikrotik_wan_readings\n    GROUP BY router_id\n),\nevaluated AS (\n    SELECT \n        lt.router_id,\n        lt.last_seen_at,\n        lt.minutes_since_last_seen,\n        CASE \n            WHEN lt.minutes_since_last_seen >= 15 THEN TRUE \n            ELSE FALSE \n        END AS is_currently_offline,\n        COALESCE(hs.is_offline, FALSE) AS was_offline\n    FROM latest_telemetry lt\n    LEFT JOIN router_heartbeat_state hs ON lt.router_id = hs.router_id\n)\nSELECT \n    router_id,\n    last_seen_at,\n    minutes_since_last_seen,\n    is_currently_offline,\n    was_offline,\n    CASE \n        WHEN is_currently_offline = TRUE AND was_offline = FALSE THEN 'OFFLINE'\n        WHEN is_currently_offline = FALSE AND was_offline = TRUE THEN 'ONLINE'\n        ELSE NULL \n    END AS alert_event\nFROM evaluated\nWHERE \n    (is_currently_offline = TRUE AND was_offline = FALSE)\n    OR\n    (is_currently_offline = FALSE AND was_offline = TRUE);",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        1120,
+        400
+      ],
+      "id": "pg-check-deadman-002",
+      "name": "Check Router Heartbeat",
+      "credentials": {
+        "postgres": {
+          "id": "XKwdrIadj1gSLirP",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "return $input.all().map(entry => {\n  const item = entry.json;\n  const isOffline = item.alert_event === 'OFFLINE';\n  \n  const lastSeenStr = item.last_seen_at \n    ? new Date(item.last_seen_at).toLocaleString('ar-EG', { timeZone: 'Africa/Cairo' })\n    : 'غير محدد';\n\n  let text = '';\n  if (isOffline) {\n    text = '🚨 <b>إنذار أمني حرج: انقطاع اتصال الراوتر بالكامل!</b>\\n\\n' +\n      '🖥️ الجهاز: <code>' + item.router_id + '</code>\\n' +\n      '⚠️ الحالة: <b>غير متصل (OFFLINE / Dead Man\\'s Switch)</b>\\n' +\n      '⏱️ مدة الانقطاع: <b>' + item.minutes_since_last_seen + ' دقيقة</b>\\n' +\n      '📅 آخر ظهور مرصود: <code>' + lastSeenStr + '</code>\\n\\n' +\n      '🚨 <i>توقف الراوتر عن إرسال قراءات الترافيك تماماً، يرجى فحص مزود الطاقة (UPS/Power)، كابلات الشبكة، أو مزودات الخدمة.</i>';\n  } else {\n    text = '✅ <b>استعادة اتصال الراوتر وعودة الخدمة</b>\\n\\n' +\n      '🖥️ الجهاز: <code>' + item.router_id + '</code>\\n' +\n      '📶 الحالة: <b>متصل وطبيعي (BACK ONLINE)</b>\\n' +\n      '📅 وقت الاستعادة: <code>' + new Date().toLocaleString('ar-EG', { timeZone: 'Africa/Cairo' }) + '</code>\\n\\n' +\n      'ℹ️ <i>تم استئناف استلام بيانات الترافيك والكوتا من الراوتر بنجاح.</i>';\n  }\n\n  return {\n    json: {\n      ...item,\n      telegram_message: text\n    }\n  };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1340,
+        400
+      ],
+      "id": "code-format-heartbeat-003",
+      "name": "Format Heartbeat Alert"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO router_heartbeat_state (\n    router_id, \n    is_offline, \n    last_seen_at, \n    last_alert_at, \n    updated_at\n)\nVALUES (\n    $1, \n    $2, \n    $3, \n    NOW(), \n    NOW()\n)\nON CONFLICT (router_id) \nDO UPDATE SET \n    is_offline = EXCLUDED.is_offline,\n    last_seen_at = COALESCE(EXCLUDED.last_seen_at, router_heartbeat_state.last_seen_at),\n    last_alert_at = NOW(),\n    updated_at = NOW();",
+        "options": {
+          "queryReplacement": "={{ [\n  $json.router_id,\n  $json.is_currently_offline,\n  $json.last_seen_at\n] }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        1560,
+        400
+      ],
+      "id": "pg-update-heartbeat-004",
+      "name": "Update Heartbeat State",
+      "credentials": {
+        "postgres": {
+          "id": "XKwdrIadj1gSLirP",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $env.TELEGRAM_ADMIN_CHAT_ID || '123456789' }}",
+        "text": "={{ $('Format Heartbeat Alert').item.json.telegram_message }}",
+        "additionalFields": {
+          "parse_mode": "HTML"
+        }
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1780,
+        400
+      ],
+      "id": "tg-send-heartbeat-005",
+      "name": "Send Heartbeat Alert Telegram",
+      "credentials": {
+        "telegramApi": {
+          "id": "ZGNboDpUiilvCAy8",
+          "name": "Telegram account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Every 5 Minutes": {
+      "main": [
+        [
+          {
+            "node": "Check Router Heartbeat",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Router Heartbeat": {
+      "main": [
+        [
+          {
+            "node": "Format Heartbeat Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Heartbeat Alert": {
+      "main": [
+        [
+          {
+            "node": "Update Heartbeat State",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Heartbeat State": {
+      "main": [
+        [
+          {
+            "node": "Send Heartbeat Alert Telegram",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": []
+}

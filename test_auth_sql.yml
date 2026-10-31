@@ -1,0 +1,40 @@
+services:
+  # The database: on app_default ONLY (like production app-postgres-1)
+  db:
+    image: postgres:16-alpine
+    container_name: test-auth-pg
+    environment:
+      POSTGRES_USER: campaign
+      POSTGRES_PASSWORD: campaign_pass
+      POSTGRES_DB: campaign_db
+      POSTGRES_INITDB_ARGS: "-c timezone=UTC"
+    networks:
+      - app_default
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U campaign -d campaign_db"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    volumes:
+      - authpg:/var/lib/postgresql/data
+
+  # The CLIENT: a non-PostgreSQL image, on BOTH networks (like patched n8n)
+  client:
+    image: node:20-alpine
+    container_name: test-auth-client
+    command: sleep 3600
+    networks:
+      - n8n
+      - app_default
+    depends_on:
+      db:
+        condition: service_healthy
+
+networks:
+  n8n:
+    driver: bridge
+  app_default:
+    driver: bridge
+
+volumes:
+  authpg:
