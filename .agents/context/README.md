@@ -17,7 +17,7 @@ This directory contains the Living Codebase Navigation Layer for the MikroTik Qu
 | Task Type | Start Here |
 |-----------|------------|
 | RouterOS script investigation | `DOMAIN_MAP.md` → RouterOS section → relevant `.rsc` file |
-| Database schema review | `DATA_FLOW.md` + `DOMAIN_MAP.md` → PostgreSQL section → `schema.sql` |
+| Database schema review | `DATA_FLOW.md` + `DOMAIN_MAP.md` → PostgreSQL section → `database/schema.sql` |
 | Grafana dashboard work | `DOMAIN_MAP.md` → Grafana section → `provisioning/dashboards/` |
 | n8n workflow analysis | `DATA_FLOW.md` → relevant flow → corresponding workflow JSON |
 | Operational investigation | `CODEBASE_MAP.md` → start with READ_ONLY utilities |

@@ -5,9 +5,15 @@ Runs completely offline using mock cursor/connection to verify retention logic,
 boundary conditions, and batch chunking.
 """
 
+import os
+import sys
 import unittest
 import datetime
+from pathlib import Path
 from unittest.mock import MagicMock
+
+# Ensure maintenance directory is in Python path regardless of execution cwd
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 import prune_telemetry
 
 class TestPruneTelemetry(unittest.TestCase):

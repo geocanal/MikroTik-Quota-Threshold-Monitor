@@ -13,10 +13,10 @@ Apply the schema to your PostgreSQL database (`campaign_db`):
 
 ```bash
 # Direct psql execution
-psql -h campaign-postgres -U postgres -d campaign_db -f schema.sql
+psql -h campaign-postgres -U postgres -d campaign_db -f database/schema.sql
 
 # Or if running PostgreSQL in Docker:
-docker exec -i campaign-postgres psql -U postgres -d campaign_db < schema.sql
+docker exec -i campaign-postgres psql -U postgres -d campaign_db < database/schema.sql
 ```
 
 ### Key Components Provisioned:
@@ -88,7 +88,7 @@ The file `MikroTik - Router Offline Monitor.json` contains a dedicated n8n workf
 This component streams Hotspot user accounting, active sessions, and remaining quota metrics every 5 minutes from RouterOS to n8n.
 
 ### 1. MikroTik RouterOS Setup:
-- Upload or copy [hotspot_telemetry.rsc](file:///D:/Work/MikroTik%20-%20Quota%20Threshold%20Monitor/hotspot_telemetry.rsc) to your MikroTik router.
+- Upload or copy [routeros/hotspot_telemetry.rsc](file:///D:/Work/MikroTik%20-%20Quota%20Threshold%20Monitor/routeros/hotspot_telemetry.rsc) to your MikroTik router.
 - Verify the `:local webhookUrl` matches your n8n instance IP (e.g. `http://192.168.88.10:5678/webhook/mikrotik/hotspot-telemetry`).
 - Install script and scheduler:
   ```routeros
@@ -241,7 +241,7 @@ DROP FUNCTION IF EXISTS calculate_cycle_boundary_date CASCADE;
 
 ## 🌐 Phase 3: RouterOS 7.x Safe Policy-Based Routing (PBR) & Isolation
 
-The file [`wan_control_pbr.rsc`](file:///d:/Work/MikroTik%20-%20Quota%20Threshold%20Monitor/wan_control_pbr.rsc) implements production-hardened policy-based routing (PBR) and automated quota isolation for MikroTik RouterOS v7.
+The file [`routeros/wan_control_pbr.rsc`](file:///d:/Work/MikroTik%20-%20Quota%20Threshold%20Monitor/routeros/wan_control_pbr.rsc) implements production-hardened policy-based routing (PBR) and automated quota isolation for MikroTik RouterOS v7.
 
 ### 🛡️ Safety & Architecture Guarantees
 1. **RouterOS v7 Native FIB Tables**: Replaces deprecated v6 routing marks with explicit `/routing table add name=to_wan1 fib` and `/routing table add name=to_wan2 fib`.
@@ -315,12 +315,12 @@ The file [`MikroTik - Telegram Interactive Bot.json`](file:///d:/Work/MikroTik%2
 Phase 6 provisions real-time health checks, RTT latency, and packet loss telemetry per WAN interface without generating intrusive network overhead.
 
 ### 🛡️ Features:
-1. **Low Overhead Probes**: Script [`wan_quality.rsc`](file:///d:/Work/MikroTik%20-%20Quota%20Threshold%20Monitor/wan_quality.rsc) sends only 3 ICMP ping packets per interface every 1 to 5 minutes using RouterOS v7 routing tables (`to_wan1`, `to_wan2`).
+1. **Low Overhead Probes**: Script [`routeros/wan_quality.rsc`](file:///d:/Work/MikroTik%20-%20Quota%20Threshold%20Monitor/routeros/wan_quality.rsc) sends only 3 ICMP ping packets per interface every 1 to 5 minutes using RouterOS v7 routing tables (`to_wan1`, `to_wan2`).
 2. **Quality Analytics Table**: Telemetry is persisted in PostgreSQL table `mikrotik_wan_quality` and aggregated in `view_mikrotik_wan_latest_quality`.
 3. **Automated Recovery**: When an isolated or degraded interface returns to `HEALTHY` (loss < 10% and RTT < 100ms) and billing cycle is renewed or has available quota, the state machine automatically triggers `RESTORE`.
 
 ### 🚀 RouterOS Deployment:
-1. Upload [`wan_quality.rsc`](file:///d:/Work/MikroTik%20-%20Quota%20Threshold%20Monitor/wan_quality.rsc) to MikroTik.
+1. Upload [`routeros/wan_quality.rsc`](file:///d:/Work/MikroTik%20-%20Quota%20Threshold%20Monitor/routeros/wan_quality.rsc) to MikroTik.
 2. Install script and periodic scheduler:
    ```routeros
    /system script add name="probe_wan_quality" source=[/file get wan_quality.rsc contents] policy=read,write,test
@@ -328,7 +328,7 @@ Phase 6 provisions real-time health checks, RTT latency, and packet loss telemet
    ```
 ---
 
-## 🔒 WCCP v1.1 Validated Production Control Path (`wccp_control.rsc`)
+## 🔒 WCCP v1.1 Validated Production Control Path (`routeros/wccp_control.rsc`)
 
 Based on physical conntrack verification and empirical testing with Hotspot client `192.168.88.49`:
 - **Root Cause Resolution**: Authenticated Hotspot clients previously bypassed PCC marks because `hotspot=from-client action=accept` was positioned ahead of PCC. Placing WCCP rules before the Hotspot bypass ensures all client Internet traffic is properly classified.
@@ -338,7 +338,7 @@ Based on physical conntrack verification and empirical testing with Hotspot clie
 - **Router Management Sanctity**: Router-originated traffic on WAN2 (`192.168.2.2`) continues functioning unimpeded.
 
 ### Production Scripts:
-1. Upload and install [`wccp_control.rsc`](file:///d:/Work/MikroTik%20-%20Quota%20Threshold%20Monitor/wccp_control.rsc) on MikroTik.
+1. Upload and install [`routeros/wccp_control.rsc`](file:///d:/Work/MikroTik%20-%20Quota%20Threshold%20Monitor/routeros/wccp_control.rsc) on MikroTik.
 2. Execute transitions safely:
    ```routeros
    # Transition to ISOLATED (Enables override with survivor check & idempotency guard)

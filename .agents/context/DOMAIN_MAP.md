@@ -8,7 +8,7 @@ Functional domains and their responsibilities, data stores, and risk classificat
 
 | Property | Value |
 |----------|-------|
-| **Primary Files** | `hotspot_telemetry.rsc` (part of scheduled collection) |
+| **Primary Files** | `routeros/hotspot_telemetry.rsc` (part of scheduled collection) |
 | **Data Store** | `mikrotik_wan_readings`, `mikrotik_wan_usage` |
 | **Upstream Input** | RouterOS WAN interface counters (via `/tool fetch`) |
 | **Downstream Consumer** | PostgreSQL views, Grafana dashboards, quota engine |
@@ -31,7 +31,7 @@ Functional domains and their responsibilities, data stores, and risk classificat
 
 | Property | Value |
 |----------|-------|
-| **Primary Files** | `wan_quality.rsc` |
+| **Primary Files** | `routeros/wan_quality.rsc` |
 | **Data Store** | `mikrotik_wan_quality`, `view_mikrotik_wan_latest_quality` |
 | **Upstream Input** | ICMP probes to 8.8.8.8 via specific routing tables |
 | **Downstream Consumer** | n8n recovery workflows, Grafana dashboards |
@@ -54,7 +54,7 @@ Functional domains and their responsibilities, data stores, and risk classificat
 
 | Property | Value |
 |----------|-------|
-| **Primary Files** | `hotspot_telemetry.rsc`, `MikroTik - Hotspot Ingestion.json` |
+| **Primary Files** | `routeros/hotspot_telemetry.rsc`, `workflows/MikroTik - Hotspot Ingestion.json` |
 | **Data Store** | `hotspot_user_telemetry`, `view_hotspot_daily_user_usage` |
 | **Upstream Input** | RouterOS Hotspot active users + user database |
 | **Downstream Consumer** | Alert engine, Grafana dashboards, user quota tracking |
@@ -78,7 +78,7 @@ Functional domains and their responsibilities, data stores, and risk classificat
 
 | Property | Value |
 |----------|-------|
-| **Primary Files** | `schema.sql` (functions + views), n8n quota engine |
+| **Primary Files** | `database/schema.sql` (functions + views), n8n quota engine |
 | **Data Store** | `mikrotik_wan_quotas`, `billing_cycles`, `quota_allocations`, `quota_day_weights`, `view_mikrotik_wan_quota_status` |
 | **Upstream Input** | WAN usage data, manual quota configuration |
 | **Downstream Consumer** | Alert engine, Grafana quota gauges, state machine |
@@ -106,7 +106,7 @@ Functional domains and their responsibilities, data stores, and risk classificat
 
 | Property | Value |
 |----------|-------|
-| **Primary Files** | `wan_control_pbr.rsc` (v1.0), `wccp_control.rsc` (v1.1) |
+| **Primary Files** | `routeros/wan_control_pbr.rsc` (v1.0), `routeros/wccp_control.rsc` (v1.1) |
 | **Data Store** | `wan_operational_state`, `wan_control_actions` |
 | **Upstream Input** | n8n quota engine, Telegram bot commands |
 | **Downstream Consumer** | Router firewall mangle rules, Telegram status alerts |
@@ -114,7 +114,7 @@ Functional domains and their responsibilities, data stores, and risk classificat
 | **Operational Risk** | **Critical** — modifies firewall, can sever WAN connectivity |
 | **Scheduling** | On-demand (quota threshold or admin command) |
 
-**Installed design conflict (VERIFIED from `router_config_clean.rsc`, 2026-10-02)**
+**Installed design conflict (VERIFIED from `routeros/router_config_clean.rsc`, 2026-10-02)**
 
 | Script | Lines | Mechanism |
 |---|---|---|
@@ -137,7 +137,7 @@ NORMAL → ISOLATION_REQUESTED → ISOLATED → (renewal) → RESTORATION_REQUES
 
 **Data Flow**: n8n workflow → PostgreSQL `transition_wan_state()` → Router script → `confirm_router_execution()`
 
-**Safety Guarantees** (WCCP v1.1, from `wccp_control.rsc`):
+**Safety Guarantees** (WCCP v1.1, from `routeros/wccp_control.rsc`):
 - INV-01: No isolation disables monitoring
 - INV-02: Router-originated traffic never isolated
 - INV-03: Only new LAN client traffic steered
@@ -161,7 +161,7 @@ NORMAL → ISOLATION_REQUESTED → ISOLATED → (renewal) → RESTORATION_REQUES
 
 | Property | Value |
 |----------|-------|
-| **Primary Files** | `MikroTik - Router Offline Monitor.json` (n8n workflow) |
+| **Primary Files** | `workflows/MikroTik - Router Offline Monitor.json` (n8n workflow) |
 | **Data Store** | `router_heartbeat_state` |
 | **Upstream Input** | Telemetry webhook reception (last_seen timestamp) |
 | **Downstream Consumer** | Telegram alerts, manual intervention triggers |
@@ -187,7 +187,7 @@ NORMAL → ISOLATION_REQUESTED → ISOLATED → (renewal) → RESTORATION_REQUES
 
 | Property | Value |
 |----------|-------|
-| **Primary Files** | `MikroTik - Telegram Interactive Bot.json` (n8n workflow) |
+| **Primary Files** | `workflows/MikroTik - Telegram Interactive Bot.json` (n8n workflow) |
 | **Data Store** | Session state only (no DB persistence for interactions) |
 | **Upstream Input** | Quota thresholds (80/95/100%), outage events, admin commands |
 | **Downstream Consumer** | Admin Telegram chat (ID: 123456789) |
@@ -221,7 +221,7 @@ NORMAL → ISOLATION_REQUESTED → ISOLATED → (renewal) → RESTORATION_REQUES
 
 **Router reachability blocker:** the router (`192.168.88.1`) is LAN-only. From
 `deploy-server` (172.40.40.x) both TCP 22 and 8728 time out. Any router execution node
-would need a VPN tunnel or an execution host inside the LAN. `router_config_clean.rsc`
+would need a VPN tunnel or an execution host inside the LAN. `routeros/router_config_clean.rsc`
 also shows `set api disabled=yes` and `set api-ssl disabled=yes`, with SSH restricted to
 `192.168.88.0/24,192.168.195.0/24` — so the API is currently disabled by config.
 
@@ -231,7 +231,7 @@ also shows `set api disabled=yes` and `set api-ssl disabled=yes`, with SSH restr
 
 | Property | Value |
 |----------|-------|
-| **Primary Files** | `MikroTik - Router Offline Monitor.json`, `MikroTik - Hotspot Ingestion.json`, `MikroTik - Quota Threshold Monitor.json`, `MikroTik - Telegram Interactive Bot.json`, `MikroTik - WAN Quality Ingestion.json` |
+| **Primary Files** | `workflows/MikroTik - Router Offline Monitor.json`, `workflows/MikroTik - Hotspot Ingestion.json`, `workflows/MikroTik - Quota Threshold Monitor.json`, `workflows/MikroTik - Telegram Interactive Bot.json`, `workflows/MikroTik - WAN Quality Ingestion.json` |
 | **Entry Points** | Webhook receivers, scheduled triggers |
 | **Data Stores** | PostgreSQL (state, audit) |
 | **Classification** | EXTERNAL_WRITE (webhooks, Telegram), DATABASE_WRITE (state transitions) |
@@ -250,11 +250,11 @@ also shows `set api disabled=yes` and `set api-ssl disabled=yes`, with SSH restr
 
 ### Known Schema Drift
 
-The Quota Threshold Monitor workflow writes to structures **not present in `schema.sql`**:
+The Quota Threshold Monitor workflow writes to structures **not present in `database/schema.sql`**:
 - Table `wan_outage_events` (columns include `landline_number`, `account_holder`, `started_at`, `ended_at`, `duration_minutes`)
-- Column `outage_started_at` on `wan_incident_state` (absent from the `schema.sql` definition)
+- Column `outage_started_at` on `wan_incident_state` (absent from the `database/schema.sql` definition)
 
-These must exist in the live database (created out-of-band) or the workflow fails at runtime. Treat `schema.sql` as incomplete rather than authoritative.
+These must exist in the live database (created out-of-band) or the workflow fails at runtime. Treat `database/schema.sql` as incomplete rather than authoritative.
 
 ---
 
@@ -264,7 +264,7 @@ These must exist in the live database (created out-of-band) or the workflow fail
 
 | Property | Value |
 |----------|-------|
-| **Primary Files** | `schema.sql` |
+| **Primary Files** | `database/schema.sql` |
 | **Database** | `campaign_db` on `campaign-postgres` (Docker) |
 | **Timezone** | Africa/Cairo (all timestamps normalized) |
 | **Classification** | DATABASE_WRITE, READ_ONLY (views) |
@@ -323,10 +323,10 @@ These must exist in the live database (created out-of-band) or the workflow fail
 | Category | Examples | Classification |
 |----------|----------|-----------------|
 | **Inspection** | `check_quality_table.py`, `inspect_incident_table.py`, `list_n8n_workflows.py` | READ_ONLY |
-| **Schema Modification** | `add_incident_cols.py`, `insert_quality_wf.sql`, `run_fix_sql.py` | DATABASE_WRITE |
+| **Schema Modification** | `add_incident_cols.py`, `database/insert_quality_wf.sql`, `database/run_fix_sql.py` | DATABASE_WRITE |
 | **Workflow Mgmt** | `activate_quality_wf.py`, `deploy_quality_workflow.py`, `register_quality_webhook.py` | DEPLOYMENT_INFRASTRUCTURE |
 | **Alerting** | `dispatch_email.py`, `send_test_email.py` | EXTERNAL_WRITE |
-| **Bot Management** | `install_bot_service.py`, `setup_remote_bot.py`, `update_bot_quality.py` | DEPLOYMENT_INFRASTRUCTURE |
+| **Bot Management** | `bot/install_bot_service.py`, `bot/setup_remote_bot.py`, `bot/update_bot_quality.py` | DEPLOYMENT_INFRASTRUCTURE |
 | **Remote Ops** | `remote_cmd.py`, `verify_db_nodes.py` | SSH-mediated (LOCAL_ONLY execution, but remote effects) |
 
 **Execution Model**: All use SSH to `deploy-server` host, execute Docker commands on remote machine.
@@ -342,7 +342,7 @@ These must exist in the live database (created out-of-band) or the workflow fail
 | Component | Purpose | Classification |
 |-----------|---------|-----------------|
 | `docker-compose.monitoring.yml` | Grafana service definition | DEPLOYMENT_INFRASTRUCTURE |
-| `schema.sql` Phase 1 | Database migration | DATABASE_WRITE |
+| `database/schema.sql` Phase 1 | Database migration | DATABASE_WRITE |
 | `provisioning/` | Zero-touch Grafana setup | DEPLOYMENT_INFRASTRUCTURE |
 | DEPLOYMENT.md phases | Orchestrated deployment steps | DEPLOYMENT_INFRASTRUCTURE |
 

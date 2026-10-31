@@ -37,8 +37,8 @@ This document captures the verified architecture of the MikroTik Quota Threshold
 
 | Component | Purpose | Classification |
 |-----------|---------|----------------|
-| `hotspot_telemetry.rsc` | Collects Hotspot user sessions, limits, bytes | READ_ONLY (router) |
-| `wan_quality.rsc` | Probes latency/packet loss via ICMP | READ_ONLY (router) |
+| `routeros/hotspot_telemetry.rsc` | Collects Hotspot user sessions, limits, bytes | READ_ONLY (router) |
+| `routeros/wan_quality.rsc` | Probes latency/packet loss via ICMP | READ_ONLY (router) |
 | n8n webhook receivers | Receive telemetry, insert to DB | EXTERNAL_WRITE |
 | PostgreSQL tables | Store raw and calculated metrics | DATABASE_WRITE (append) |
 | Grafana dashboards | Visualize metrics | READ_ONLY |
@@ -47,8 +47,8 @@ This document captures the verified architecture of the MikroTik Quota Threshold
 
 | Component | Purpose | Classification |
 |-----------|---------|----------------|
-| `wan_control_pbr.rsc` | PCC/PBR rules, isolate/restore scripts | ROUTER_WRITE |
-| `wccp_control.rsc` | Simplified isolation controller (ISOLATE_WAN2, RESTORE_WAN2) | ROUTER_WRITE |
+| `routeros/wan_control_pbr.rsc` | PCC/PBR rules, isolate/restore scripts | ROUTER_WRITE |
+| `routeros/wccp_control.rsc` | Simplified isolation controller (ISOLATE_WAN2, RESTORE_WAN2) | ROUTER_WRITE |
 | n8n quota engine workflow | Evaluates quota thresholds, triggers isolation | EXTERNAL_WRITE + DATABASE_WRITE |
 | n8n Telegram bot workflow | Receives admin commands, executes state transitions | EXTERNAL_WRITE + DATABASE_WRITE |
 | PostgreSQL state functions | `transition_wan_state()`, `confirm_router_execution()` | DATABASE_WRITE |
@@ -58,8 +58,8 @@ This document captures the verified architecture of the MikroTik Quota Threshold
 
 | Source | Target | Interval | Evidence |
 |--------|--------|----------|----------|
-| Router scheduler | `hotspot_telemetry.rsc` | 5m | DEPLOYMENT.md line 96 |
-| Router scheduler | `wan_quality.rsc` | 2m (recommended) | DEPLOYMENT.md line 327 |
+| Router scheduler | `routeros/hotspot_telemetry.rsc` | 5m | DEPLOYMENT.md line 96 |
+| Router scheduler | `routeros/wan_quality.rsc` | 2m (recommended) | DEPLOYMENT.md line 327 |
 | n8n Schedule trigger | Router Offline Monitor workflow | 5m | DEPLOYMENT.md line 67 |
 | n8n webhook | Hotspot Ingestion workflow | On webhook receipt | Passive |
 | n8n webhook | Telegram Bot workflow | On Telegram callback | Passive |
@@ -175,7 +175,7 @@ Also verified in deployed quota logic:
 ### Repair
 
 Attach `n8n` to `app_default`. Full analysis, alternatives, rollout, rollback and
-gap-fill caution: `INGESTION_REPAIR.md`. Local isolated reproduction:
+gap-fill caution: `docs/INGESTION_REPAIR.md`. Local isolated reproduction:
 `test_network_isolation.sh` + `test_network_isolation.yml` (7/7 checks pass).
 
 ## Verified Gaps Between Design and Implementation
@@ -187,16 +187,16 @@ plane that is not fully wired.
 | # | Gap | Evidence | Impact |
 |---|-----|----------|--------|
 | 1 | **No router execution path in any deployed workflow.** No workflow contains an SSH / RouterOS / API node. | Zero matches for `ssh`, `routeros`, `api.mikrotik`, `/system script` across all 5 local exports; deployed `PPAQLTX0UUv4OnZl` has 24 nodes matching the local export | Quota exhaustion alerts only. **Scope limit:** this establishes absence *within the inspected workflows and their nodes*, not across all n8n features (e.g. a disabled credential or an external service invoked via `httpRequest` to a non-obvious host) |
-| 2 | **`transition_wan_state()` HAS a caller** — the Telegram bot (`Execute State Transition`). `confirm_router_execution()` has none. | `MikroTik - Telegram Interactive Bot.json` node `Execute State Transition` calls `transition_wan_state($1..$6)`; keyword scan: `transition_wan_state` ×1, `confirm_router_execution` ×0 | **PARTIALLY CONTRADICTED** — an earlier audit wrongly said "never called". Because there is no execution node, the transition records *desired* state only and no router confirmation ever follows |
-| 3 | **`wan_outage_events` table and `wan_incident_state.outage_started_at` are missing from `schema.sql`.** | String search: both absent from `schema.sql`, present in workflow SQL | `schema.sql` is not a complete/authoritative DDL; drift is real |
-| 4 | **The isolation override rule DOES exist — in `router_config_clean.rsc`.** An earlier audit wrongly classified that file as "archived, unused". | `router_config_clean.rsc:174-177` creates `WCCP-WAN2-ISOLATION-OVERRIDE` (mark-connection → `cm_wan1`, `hotspot=from-client`, `in-interface=bridge`, **enabled**), positioned *before* the PCC rules | **CONTRADICTED** — prerequisite is present in the config export |
-| 5 | **The WAN usage collector DOES exist — in `router_config_clean.rsc`.** An earlier audit wrongly reported no `.rsc` posts to `mikrotik/wan-usage`. | `router_config_clean.rsc:446-448` scheduler `schedule-wan-telemetry` (5m, `start-time=startup`) → script `send-wan-telemetry` (`:507-527`) POSTs `https://n8n.example.com/webhook/mikrotik/wan-usage` with `{router_id, uptime, wan1:{rx,tx}, wan2:{rx,tx}}` | **CONTRADICTED** — sender identified |
+| 2 | **`transition_wan_state()` HAS a caller** — the Telegram bot (`Execute State Transition`). `confirm_router_execution()` has none. | `workflows/MikroTik - Telegram Interactive Bot.json` node `Execute State Transition` calls `transition_wan_state($1..$6)`; keyword scan: `transition_wan_state` ×1, `confirm_router_execution` ×0 | **PARTIALLY CONTRADICTED** — an earlier audit wrongly said "never called". Because there is no execution node, the transition records *desired* state only and no router confirmation ever follows |
+| 3 | **`wan_outage_events` table and `wan_incident_state.outage_started_at` are missing from `database/schema.sql`.** | String search: both absent from `database/schema.sql`, present in workflow SQL | `database/schema.sql` is not a complete/authoritative DDL; drift is real |
+| 4 | **The isolation override rule DOES exist — in `routeros/router_config_clean.rsc`.** An earlier audit wrongly classified that file as "archived, unused". | `router_config_clean.rsc:174-177` creates `WCCP-WAN2-ISOLATION-OVERRIDE` (mark-connection → `cm_wan1`, `hotspot=from-client`, `in-interface=bridge`, **enabled**), positioned *before* the PCC rules | **CONTRADICTED** — prerequisite is present in the config export |
+| 5 | **The WAN usage collector DOES exist — in `routeros/router_config_clean.rsc`.** An earlier audit wrongly reported no `.rsc` posts to `mikrotik/wan-usage`. | `router_config_clean.rsc:446-448` scheduler `schedule-wan-telemetry` (5m, `start-time=startup`) → script `send-wan-telemetry` (`:507-527`) POSTs `https://n8n.example.com/webhook/mikrotik/wan-usage` with `{router_id, uptime, wan1:{rx,tx}, wan2:{rx,tx}}` | **CONTRADICTED** — sender identified |
 | 6 | **BOTH isolation designs are installed on the router and they are mutually contradictory.** `isolate_wan2` disables `RULE-10`/`RULE-12` (`:528-546`) while `ISOLATE_WAN2` enables the override (`:582+`); `restore_wan2` disables the override while `RESTORE_WAN2` also disables it. | `router_config_clean.rsc:528-597` — four scripts, two designs | **VERIFIED — highest operational risk** |
-| 7 | **Mixed webhook destinations resolved:** `192.168.88.10:5678` vs `n8n.example.com` are not necessarily the same instance. | Deployed n8n has `WEBHOOK_URL=https://n8n.example.com/`; `send-wan-telemetry` and `wan_quality.rsc` use the public URL, while `hotspot_telemetry.rsc` still uses `192.168.88.10:5678` (LAN address) | **VERIFIED** — split configuration, LAN address may be stale |
+| 7 | **Mixed webhook destinations resolved:** `192.168.88.10:5678` vs `n8n.example.com` are not necessarily the same instance. | Deployed n8n has `WEBHOOK_URL=https://n8n.example.com/`; `send-wan-telemetry` and `routeros/wan_quality.rsc` use the public URL, while `routeros/hotspot_telemetry.rsc` still uses `192.168.88.10:5678` (LAN address) | **VERIFIED** — split configuration, LAN address may be stale |
 | 8 | **Live ingestion is failing, not merely stale.** Webhooks still arrive (2026-10-02 05:55 UTC) but no rows are written since 2026-09-30 17:35 UTC. Root cause is Docker network separation — see "Root Cause" section above. | `execution_entity` error counts; n8n log `ENOTFOUND app-postgres-1`; Node DNS check inside n8n | **VERIFIED** — monitoring has been blind ~37.8 h |
 | 9 | **Manual control is non-functional.** The Telegram bot calls `transition_wan_state()` but is **inactive** and has **no router execution node** and **no `confirm_router_execution()` call**. | `webhook_entity` shows the bot webhook; `workflow_entity.active = f`; zero executions; node graph ends at `Notify Action Result` | **VERIFIED** |
 | 10 | **Router at `192.168.88.1` is unreachable from `deploy-server`** (172.40.40.x). Ports 8728/22 both time out. | TCP probe from deploy-server | **VERIFIED BLOCKER** — router is LAN-only, needs VPN or in-network host |
-| 11 | **`router_config_clean.rsc` shows `set api disabled=yes`.** This is what a **configuration export** records, not what the live router is running. | `router_config_clean.rsc:285,287` | **UNVERIFIED as to live state** — the export may predate/postdate the live config. Live API status cannot be asserted without router access. Do not enable the API or expose management ports to resolve this. |
+| 11 | **`routeros/router_config_clean.rsc` shows `set api disabled=yes`.** This is what a **configuration export** records, not what the live router is running. | `router_config_clean.rsc:285,287` | **UNVERIFIED as to live state** — the export may predate/postdate the live config. Live API status cannot be asserted without router access. Do not enable the API or expose management ports to resolve this. |
 
 ### Scope limits on earlier claims (corrected 2026-10-02)
 
@@ -255,7 +255,7 @@ Dashboard backups and superseded dashboard exports only:
 - `updated_wan_dashboard.json` — older dashboard version
 - `verify_dash.json` — verification dashboard
 
-**Correction (2026-10-02):** `router_config_clean.rsc` was previously listed here as
+**Correction (2026-10-02):** `routeros/router_config_clean.rsc` was previously listed here as
 "archived / not part of active architecture". That was **wrong**. It contains the
 installed mangle rules, routing tables, schedulers, and the WAN telemetry sender.
 It is now mapped under RouterOS Configuration above.

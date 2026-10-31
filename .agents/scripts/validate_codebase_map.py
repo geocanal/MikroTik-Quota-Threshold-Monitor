@@ -19,6 +19,11 @@ import re
 import sys
 from pathlib import Path
 
+if hasattr(sys.stdout, 'reconfigure'):
+    sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+if hasattr(sys.stderr, 'reconfigure'):
+    sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+
 # Repository root (where this script runs)
 REPO_ROOT = Path.cwd()
 
@@ -154,13 +159,13 @@ def validate_all_maps():
     
     # Critical paths that must exist (core system)
     critical_paths = {
-        'schema.sql',
+        'database/schema.sql',
         'docker-compose.monitoring.yml',
         'DEPLOYMENT.md',
-        'hotspot_telemetry.rsc',
-        'wan_quality.rsc',
-        'wan_control_pbr.rsc',
-        'wccp_control.rsc',
+        'routeros/hotspot_telemetry.rsc',
+        'routeros/wan_quality.rsc',
+        'routeros/wan_control_pbr.rsc',
+        'routeros/wccp_control.rsc',
         'provisioning/datasources/datasource.yml',
         'provisioning/dashboards/dashboards.yml',
         'provisioning/dashboards/mikrotik-overview.json',
@@ -170,10 +175,10 @@ def validate_all_maps():
     # Important paths (should exist for system to function)
     important_paths = {
         'provisioning/dashboards/hotspot-overview.json',
-        'MikroTik - Router Offline Monitor.json',
-        'MikroTik - Hotspot Ingestion.json', 
-        'MikroTik - WAN Quality Ingestion.json',
-        'MikroTik - Telegram Interactive Bot.json'
+        'workflows/MikroTik - Router Offline Monitor.json',
+        'workflows/MikroTik - Hotspot Ingestion.json', 
+        'workflows/MikroTik - WAN Quality Ingestion.json',
+        'workflows/MikroTik - Telegram Interactive Bot.json'
     }
     
     # Check which paths exist
@@ -242,9 +247,9 @@ def scan_for_unmapped_paths(documented_paths):
                 candidates.append(str(path.relative_to(REPO_ROOT)).replace('\\', '/'))
 
     # n8n workflow exports at root (name pattern)
-    for path in REPO_ROOT.glob('*.json'):
+    for path in (list(REPO_ROOT.glob('*.json')) + list((REPO_ROOT / 'workflows').glob('*.json'))):
         if path.name.startswith('MikroTik'):
-            candidates.append(path.name)
+            candidates.append(str(path.relative_to(REPO_ROOT)).replace('\\', '/'))
 
     unmapped = []
     for rel in sorted(set(candidates)):
@@ -263,7 +268,7 @@ def main():
     print()
     
     # Check if repository appears to be the right one
-    if not (REPO_ROOT / 'schema.sql').exists():
+    if not (REPO_ROOT / 'database' / 'schema.sql').exists() and not (REPO_ROOT / 'schema.sql').exists():
         print("⚠️  Warning: schema.sql not found - may not be correct repository")
         print()
     

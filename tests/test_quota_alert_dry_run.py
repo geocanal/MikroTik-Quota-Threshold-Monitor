@@ -8,8 +8,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-# Add directory to sys.path
-sys.path.insert(0, str(Path(__file__).parent))
+# Add tools directory to sys.path
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "tools"))
 from quota_alert_dry_run import preview_alerts
 
 
@@ -173,13 +173,13 @@ class TestPreviewAlerts(unittest.TestCase):
 
 class TestCli(unittest.TestCase):
     def test_cli_help(self):
-        script = Path(__file__).parent / "quota_alert_dry_run.py"
+        script = Path(__file__).resolve().parent.parent / "tools" / "quota_alert_dry_run.py"
         proc = subprocess.run([sys.executable, str(script), "--help"], capture_output=True, text=True)
         self.assertEqual(proc.returncode, 0)
         self.assertIn("usage:", proc.stdout.lower())
 
     def test_cli_stdin(self):
-        script = Path(__file__).parent / "quota_alert_dry_run.py"
+        script = Path(__file__).resolve().parent.parent / "tools" / "quota_alert_dry_run.py"
         input_data = json.dumps({
             "statuses": [
                 {
@@ -196,14 +196,14 @@ class TestCli(unittest.TestCase):
         self.assertEqual(out["would_send"], 1)
 
     def test_cli_invalid_input_exit_2(self):
-        script = Path(__file__).parent / "quota_alert_dry_run.py"
+        script = Path(__file__).resolve().parent.parent / "tools" / "quota_alert_dry_run.py"
         proc = subprocess.run([sys.executable, str(script), "-"], input="not json", capture_output=True, text=True)
         self.assertEqual(proc.returncode, 2)
         self.assertEqual(proc.stdout, "")
         self.assertIn("Validation error", proc.stderr)
 
     def test_cli_missing_file_safe_stderr(self):
-        script = Path(__file__).parent / "quota_alert_dry_run.py"
+        script = Path(__file__).resolve().parent.parent / "tools" / "quota_alert_dry_run.py"
         secret_path = "non_existent_secret_file_path_12345.json"
         proc = subprocess.run([sys.executable, str(script), secret_path], capture_output=True, text=True)
         self.assertEqual(proc.returncode, 2)
@@ -212,7 +212,7 @@ class TestCli(unittest.TestCase):
         self.assertIn("Validation error", proc.stderr)
 
     def test_cli_disallowed_top_level_key_safe_stderr(self):
-        script = Path(__file__).parent / "quota_alert_dry_run.py"
+        script = Path(__file__).resolve().parent.parent / "tools" / "quota_alert_dry_run.py"
         secret_key = "super_secret_auth_token_key"
         input_data = json.dumps({"statuses": [], secret_key: "value"})
         proc = subprocess.run([sys.executable, str(script), "-"], input=input_data, capture_output=True, text=True)
@@ -223,7 +223,7 @@ class TestCli(unittest.TestCase):
 
     def test_cli_ascii_encoding_with_arabic(self):
         import os
-        script = Path(__file__).parent / "quota_alert_dry_run.py"
+        script = Path(__file__).resolve().parent.parent / "tools" / "quota_alert_dry_run.py"
         input_data = json.dumps({
             "statuses": [
                 {
@@ -249,7 +249,7 @@ class TestCli(unittest.TestCase):
         self.assertEqual(out["would_send"], 1)
 
     def test_cli_deeply_nested_json_recursion_error(self):
-        script = Path(__file__).parent / "quota_alert_dry_run.py"
+        script = Path(__file__).resolve().parent.parent / "tools" / "quota_alert_dry_run.py"
         nested = "[" * 3000 + "]" * 3000
         proc = subprocess.run([sys.executable, str(script), "-"], input=nested, capture_output=True, text=True)
         self.assertEqual(proc.returncode, 2)
